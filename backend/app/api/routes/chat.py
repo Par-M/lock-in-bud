@@ -6,7 +6,6 @@ from uuid import UUID
 from fastapi import APIRouter
 from fastapi import Depends
 from fastapi import HTTPException
-from fastapi import Request
 from fastapi import status
 from sqlalchemy.orm import Session
 
@@ -72,17 +71,11 @@ def get_conversation(
 
 @router.post("/conversations/{conversation_id}/messages", response_model=ChatSendResponse)
 def send_message(
-    request: Request,
     conversation_id: UUID,
     payload: ChatMessageCreate,
     service: ChatService = Depends(_service),
 ) -> ChatSendResponse:
-    user = request.scope.get("user") if hasattr(request.scope, "get") else None
-    user_id = getattr(user, "id", "anon") if user else "anon"
-    try:
-        _rate_limit(str(user_id))
-    except HTTPException:
-        raise
+    _rate_limit(str(service.user_id))
     try:
         result = service.send_message(conversation_id, payload.content)
     except ChatServiceError as exc:
