@@ -73,6 +73,7 @@ struct FocusDashboardView: View {
                     timerCard
 
                     statsButton
+                    ChatButton()
 
                     if let summary = focus.summary, let analysis = summary.analysis, !analysis.isEmpty {
                         analysisCard(analysis)

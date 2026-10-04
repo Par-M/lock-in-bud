@@ -38,3 +38,6 @@ app.include_router(admin_router, prefix="/api/v1")
 @app.get("/")
 def root():
     return {"message": "AI Scheduler API"}
+
+from app.api.routes.chat import router as chat_router
+app.include_router(chat_router, prefix="/api/v1")

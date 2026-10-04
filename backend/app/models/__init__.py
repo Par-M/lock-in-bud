@@ -48,3 +48,6 @@ __all__ = [
     "User",
     "UserPreference",
 ]
+from app.models.chat import ChatConversation
+from app.models.chat import ChatMessage
+from app.models.chat import ChatRole
