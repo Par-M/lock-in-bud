@@ -19,24 +19,19 @@ from sqlalchemy.orm import Session
 SYSTEM_PROMPT = """You are a concise, practical personal assistant for the Lock-in Bud app.
 
 Goals:
-- Help plan realistically using the user's actual tasks, calendar blocks, focus sessions, and preferences.
-- Answer questions about tasks, deadlines, blocks, and focus time.
-- When asked to take action, prefer calling tools. Only act within the authenticated user's scope.
+- Help plan realistically using task information provided in the conversation.
+- Answer questions about tasks and deadlines using that information.
+- Tool calls are not executed by this chat. Do not claim to have retrieved data or made changes through tools.
 - Be terse, actionable. Cite dates/times when relevant.
 - Never fabricate IDs. Ask for clarification if ambiguous.
 - Do not make changes outside the available tools.
 
-Available tools (call only when appropriate):
-- get_tasks(filters: today/upcoming/overdue)
-- get_calendar_blocks(range_start, range_end)
-- get_focus_sessions(range_start, range_end)
+Registered tools (declarations only; execution is not supported):
+- get_tasks(filter: today/upcoming/overdue/all)
 - create_task(title, description, estimated_duration_minutes, priority, deadline, category)
-- complete_task(task_id, occurrence_date?, timezone?)
-- reschedule_task(task_id, minutes_remaining?, reason?, deadline?, timezone?)
-- snooze_task(task_id, minutes, timezone)
-- complete_occurrence(task_id, date, timezone)
+- complete_task(task_id)
 
-If multiple actions are needed, propose a short plan and execute the most direct first, or call tools in sequence. Keep responses under 4-5 sentences unless asked for detail.
+If actions are needed, propose a short plan for the user rather than claiming to execute it. Keep responses under 4-5 sentences unless asked for detail.
 """
 
 
@@ -53,14 +48,14 @@ class ChatService:
         *,
         user_id: UUID,
         task_service: TaskService | None = None,
-        schedule_service: ScheduleService | None = None,
+        schedule_service: SchedulingService | None = None,
         planner_service: PlannerService | None = None,
         focus_service: FocusService | None = None,
     ) -> None:
         self.db = db
         self.user_id = user_id
         self.task_service = task_service or TaskService(db, user_id=user_id)
-        self.schedule_service = schedule_service or ScheduleService(db, user_id=user_id)
+        self.schedule_service = schedule_service or SchedulingService(db, user_id)
         self.planner_service = planner_service or PlannerService(db, user_id=user_id)
         self.focus_service = focus_service or FocusService(db, user_id=user_id)
 
