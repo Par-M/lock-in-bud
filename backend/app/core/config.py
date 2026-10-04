@@ -22,5 +22,13 @@ class Settings(BaseSettings):
     apns_key_path: str = ""
     apns_environment: str = "sandbox"
 
+    # Chat/Assistant settings
+    gemini_chat_model: str = "gemini-2.5-flash-lite"
+    chat_rate_limit_rpm: int = 10
+    chat_rate_limit_rph: int = 60
+    chat_rate_limit_rpd: int = 100
+    chat_max_context_messages: int = 20
+    chat_max_turns: int = 8
+
 
 settings = Settings()

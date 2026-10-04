@@ -48,6 +48,8 @@ struct MyAppApp: App {
         )
     }
 
+    @State private var chatService = ChatService()
+
     var body: some Scene {
         WindowGroup {
             ContentView()
@@ -64,6 +66,7 @@ struct MyAppApp: App {
                 .environment(appearance)
                 .environment(habitService)
                 .environment(focusService)
+                .environment(chatService)
                 .preferredColorScheme(appearance.theme.colorScheme)
                 .task {
                     await authService.restoreSession()
@@ -91,3 +94,6 @@ struct MyAppApp: App {
         .modelContainer(localStore.container)
     }
 }
+
+import Observation
+extension ChatService: Observable {}
