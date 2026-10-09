@@ -21,11 +21,11 @@ test.beforeEach(async ({ page }) => {
   });
 });
 
-test("Today is the landing view and groups tasks without claiming time means completion", async ({ page }) => {
+test("Schedule is the landing view without a Today tab, and task groups distinguish tracked time", async ({ page }) => {
   await page.goto("/");
-  await expect(page.getByRole("heading", { name: "Today", exact: true })).toBeVisible();
-  await expect(page.getByRole("region", { name: "Today’s tasks" }).getByText("Overdue work", { exact: true })).toBeVisible();
-  await expect(page.getByRole("region", { name: "Today’s tasks" }).getByText("Future work", { exact: true })).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: "Schedule", exact: true })).toBeVisible();
+  await expect(page.getByRole("navigation").getByRole("button", { name: "Today", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("navigation").getByRole("button")).toHaveCount(4);
   await page.getByRole("navigation").getByRole("button", { name: "Tasks", exact: true }).click();
   for (const group of ["Overdue", "Today", "Upcoming", "Unscheduled"]) await expect(page.locator(".task-group-heading").filter({ hasText: group })).toBeVisible();
   await expect(page.getByText("Time tracked: 30 of 30 min").first()).toBeVisible();
@@ -37,6 +37,7 @@ test("Today is the landing view and groups tasks without claiming time means com
 
 test("new tasks start simple, events require both times, and keyboard dismissal restores focus", async ({ page }) => {
   await page.goto("/");
+  await page.getByRole("navigation").getByRole("button", { name: "Tasks", exact: true }).click();
   const add = page.getByRole("button", { name: "New task", exact: true }); await add.click();
   const dialog = page.getByRole("dialog", { name: "New task" });
   await expect(dialog.getByLabel("Estimated minutes")).toBeVisible();
@@ -96,9 +97,9 @@ test("desktop assistant keeps the plan usable and becomes modal on smaller scree
 
 test("dark theme keeps primary actions readable without horizontal overflow", async ({ page }) => {
   await page.emulateMedia({ colorScheme: "dark", reducedMotion: "reduce" });
-  await page.goto("/"); await expect(page.getByRole("heading", { name: "Today", exact: true })).toBeVisible();
-  await page.screenshot({ path: `/tmp/ui-ux-today-dark-${test.info().project.name}.png`, fullPage: true });
-  const primary = page.getByRole("region", { name: "Your next step" }).getByRole("button", { name: "Start focus", exact: true });
+  await page.goto("/"); await expect(page.getByRole("heading", { name: "Schedule", exact: true })).toBeVisible();
+  await page.screenshot({ path: `/tmp/ui-ux-schedule-dark-${test.info().project.name}.png`, fullPage: true });
+  const primary = page.getByRole("button", { name: "Add block", exact: true });
   const colors = await primary.evaluate(el => ({ text: getComputedStyle(el).color, background: getComputedStyle(el).backgroundColor }));
   expect(colors.text).toBe("rgb(0, 0, 0)"); expect(colors.background).toBe("rgb(100, 181, 255)");
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);

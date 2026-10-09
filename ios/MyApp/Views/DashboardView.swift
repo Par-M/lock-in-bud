@@ -2,7 +2,6 @@ import SwiftUI
 
 struct DashboardView: View {
     private enum Tab: Hashable {
-        case today
         case schedule
         case tasks
         case habits
@@ -13,11 +12,10 @@ struct DashboardView: View {
     @AppStorage("focusTimerStartedAt") private var timerStart = 0.0
     @Environment(SyncManager.self) private var sync
     @Environment(ConnectivityMonitor.self) private var connectivity
-    @State private var selectedTab: Tab = .today
+    @State private var selectedTab: Tab = .schedule
 
     var body: some View {
         TabView(selection: $selectedTab) {
-            TodayView().tabItem { Label("Today", systemImage: "sun.max") }.tag(Tab.today)
             WeeklyScheduleView()
                 .tabItem {
                     Label("Schedule", systemImage: "calendar")

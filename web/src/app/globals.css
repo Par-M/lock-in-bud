@@ -158,7 +158,7 @@ progress { width: 100%; height: 8px; accent-color: var(--accent); margin: 0 0 8p
 @media (max-width: 1000px) { .tab-nav { margin-left: 32px; margin-right: 32px; } .schedule-layout { grid-template-columns: 340px minmax(0, 1fr); gap: 16px; } .task-actions { flex-wrap: wrap; width: 88px; } }
 @media (max-width: 760px) {
   .app-header { padding: 16px; }
-  .tab-nav { position: fixed; z-index: 10; bottom: 0; left: 0; right: 0; margin: 0; border-top: 1px solid var(--line); border-bottom: 0; background: var(--surface); padding: 8px 8px calc(8px + env(safe-area-inset-bottom)); display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 4px; }
+  .tab-nav { position: fixed; z-index: 10; bottom: 0; left: 0; right: 0; margin: 0; border-top: 1px solid var(--line); border-bottom: 0; background: var(--surface); padding: 8px 8px calc(8px + env(safe-area-inset-bottom)); display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 4px; }
   .tab-nav button { display: flex; flex-direction: column; gap: 3px; padding: 7px 4px; font-size: 12px; min-height: 54px; border-radius: 10px; }
   .tab-nav svg { width: 22px; height: 22px; }
   .running-dot { position: absolute; top: 8px; right: 22%; }
@@ -200,8 +200,6 @@ progress { width: 100%; height: 8px; accent-color: var(--accent); margin: 0 0 8p
 .chat-task-link { display: inline; color: var(--accent); padding: 0; border: 0; background: transparent; text-decoration: underline; min-height: 0; }
 
 /* Daily actions and readable feedback across phone and desktop. */
-.today-hero { display: flex; flex-direction: column; align-items: flex-start; gap: 12px; background: var(--accent-soft); }
-.today-task { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; border-bottom: 1px solid var(--line); padding: 12px 0; }
 .focus-strip, .feedback-strip { max-width: 1120px; margin: 12px auto; padding: 12px 16px; display: flex; align-items: center; flex-wrap: wrap; gap: 12px; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; }
 .focus-strip { position: sticky; top: 0; z-index: 5; }
 .task-menu { position: relative; margin: 0; }
@@ -227,9 +225,3 @@ progress { width: 100%; height: 8px; accent-color: var(--accent); margin: 0 0 8p
 }
 
 .sync-status { max-width: 1120px; margin: 0 auto; padding: 8px 16px; font-size: 14px; color: var(--muted); overflow-wrap: anywhere; }
-
-@media (max-width: 600px) {
-  .today-task { display: grid; grid-template-columns: 44px minmax(0, 1fr); }
-  .today-task > .task-title { width: 100%; }
-  .today-task > :nth-child(n + 3) { grid-column: 2; justify-self: start; }
-}
