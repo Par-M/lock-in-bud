@@ -132,6 +132,8 @@ struct NotificationSettingsView: View {
         leadHours = max(preference.deadlineReminderLeadHours, 1)
         overdueEnabled = preference.overdueAlertsEnabled
         rescheduleEnabled = preference.rescheduleAlertsEnabled
+        fifteenMinuteReminderEnabled = preference.fifteenMinuteReminderEnabled
+        fifteenMinuteReminderLeadMinutes = preference.fifteenMinuteReminderLeadMinutes
         didLoad = true
     }
 

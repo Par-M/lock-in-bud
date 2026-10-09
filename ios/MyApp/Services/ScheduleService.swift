@@ -101,16 +101,21 @@ final class ScheduleService {
         await loadBlocks()
     }
 
-    func reject(_ target: ScheduleProposal) async {
+    func reject(_ target: ScheduleProposal) async -> Bool {
+        guard !isSyncing else { return false }
+        isSyncing = true
+        defer { isSyncing = false }
         errorMessage = nil
         do {
             _ = try await client.request(ScheduleEndpoint.reject(target.id)) as RecommendationResponse
         } catch {
             errorMessage = error.localizedDescription
+            return false
         }
         if proposal?.id == target.id {
             proposal = nil
         }
+        return true
     }
 
     func acceptItem(_ target: ScheduleProposal, item: ScheduleItem) async throws {

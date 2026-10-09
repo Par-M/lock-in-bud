@@ -2,6 +2,7 @@ import json
 import math
 from datetime import date
 from datetime import datetime
+from datetime import time
 from datetime import timedelta
 from typing import Protocol
 from uuid import UUID
@@ -56,11 +57,11 @@ class GeminiProvider:
     def __init__(
         self,
         api_key: str | None = None,
-        model: str = "gemini-2.0-flash",
+        model: str | None = None,
         timeout: float = 45.0,
     ) -> None:
         self.api_key = api_key or settings.gemini_api_key
-        self.model = model
+        self.model = model or settings.gemini_chat_model
         self.timeout = timeout
 
     def generate_schedule(
@@ -72,7 +73,7 @@ class GeminiProvider:
         try:
             response = httpx.post(
                 f"{self.BASE_URL}/models/{self.model}:generateContent",
-                params={"key": self.api_key},
+                headers={"x-goog-api-key": self.api_key},
                 json={
                     "contents": [
                         {"role": "user", "parts": [{"text": prompt}]}
@@ -95,31 +96,46 @@ class GeminiProvider:
             if not text:
                 raise ProviderError("Gemini returned an empty response")
             return self._parse_output(text)
-        except httpx.HTTPError as exc:
-            raise ProviderError(f"Gemini request failed: {exc}") from exc
-        except (KeyError, IndexError, json.JSONDecodeError) as exc:
-            raise ProviderError(f"Could not parse Gemini response: {exc}") from exc
+        except httpx.HTTPStatusError as exc:
+            raise ProviderError(
+                f"Gemini request failed (HTTP {exc.response.status_code})"
+            ) from None
+        except httpx.HTTPError:
+            raise ProviderError("Gemini request failed") from None
+        except (KeyError, IndexError, TypeError, ValueError, AttributeError):
+            raise ProviderError("Could not parse Gemini response") from None
 
     def _parse_output(self, text: str) -> ProviderResult:
-        data = json.loads(text)
-        items = []
-        for entry in data.get("items", []):
-            task_id = entry.get("task_id")
-            if not task_id:
-                raise ProviderError("Gemini output item missing task_id")
-            items.append(
-                ProposedBlock(
-                    task_id=UUID(task_id),
-                    task_title=entry.get("task_title", ""),
-                    start=_parse_datetime(entry["start"]),
-                    end=_parse_datetime(entry["end"]),
-                    reason=entry.get("reason", ""),
+        try:
+            data = json.loads(text)
+            if not isinstance(data, dict) or not isinstance(data.get("items"), list):
+                raise ProviderError("Gemini output must contain an items array")
+            if not isinstance(data.get("reasoning", ""), str):
+                raise ProviderError("Gemini output reasoning must be text")
+            items = []
+            for entry in data["items"]:
+                if not isinstance(entry, dict):
+                    raise ProviderError("Gemini output item must be an object")
+                if any(
+                    not isinstance(entry.get(key, ""), str)
+                    for key in ("task_title", "reason")
+                ):
+                    raise ProviderError("Gemini output item labels must be text")
+                task_id = entry.get("task_id")
+                if not task_id:
+                    raise ProviderError("Gemini output item missing task_id")
+                items.append(
+                    ProposedBlock(
+                        task_id=UUID(task_id),
+                        task_title=entry.get("task_title", ""),
+                        start=_parse_datetime(entry["start"]),
+                        end=_parse_datetime(entry["end"]),
+                        reason=entry.get("reason", ""),
+                    )
                 )
-            )
-        return ProviderResult(
-            items=items,
-            reasoning=data.get("reasoning", ""),
-        )
+            return ProviderResult(items=items, reasoning=data.get("reasoning", ""))
+        except (KeyError, TypeError, ValueError, AttributeError):
+            raise ProviderError("Could not parse Gemini response") from None
 
 
 class HeuristicProvider:
@@ -155,7 +171,7 @@ class HeuristicProvider:
         self._max_chunk = context.max_chunk_minutes
         self._max_daily = context.max_daily_hours * 60
         self._tz = ZoneInfo(context.timezone)
-        day_used: dict[date, int] = {}
+        day_used = dict(context.committed_minutes_by_day)
 
         for task in fixed_tasks:
             placement = self._place_fixed_task(task, available)
@@ -166,9 +182,15 @@ class HeuristicProvider:
             blocks.extend(placed)
             available = remaining
             for block in placed:
-                day = block.start.astimezone(self._tz).date()
-                minutes = int((block.end - block.start).total_seconds() // 60)
-                day_used[day] = day_used.get(day, 0) + minutes
+                cursor = block.start.astimezone(self._tz)
+                end = block.end.astimezone(self._tz)
+                while cursor < end:
+                    day = cursor.date()
+                    day_end = datetime.combine(day + timedelta(days=1), time(), tzinfo=self._tz)
+                    segment_end = min(end, day_end)
+                    minutes = int((segment_end - cursor).total_seconds() // 60)
+                    day_used[day] = day_used.get(day, 0) + minutes
+                    cursor = segment_end
 
         for task in flexible:
             placement = self._place_task(task, available, day_used)

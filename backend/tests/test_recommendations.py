@@ -36,7 +36,7 @@ def _freeze_clock(monkeypatch):
         )
 
 
-NOW = datetime.now(timezone.utc)
+NOW = _fake_now()
 
 
 def _login(client, email="rec@example.com", name="Rec"):
@@ -50,6 +50,10 @@ def _login(client, email="rec@example.com", name="Rec"):
 
 def _auth(token):
     return {"Authorization": f"Bearer {token}"}
+
+
+def _parse_at(value):
+    return datetime.fromisoformat(value.replace("Z", "+00:00"))
 
 
 def _create(client, token, **overrides):
@@ -169,12 +173,7 @@ class TestEligibleDays:
 
 
 class TestFindFreeSlots:
-    def test_past_days_are_fully_free_without_regression(self, monkeypatch):
-        # The generic free_slots helper is shared with the scheduler, which
-        # passes its own (possibly past) window dates and blocks out the past
-        # via explicit busy times. Recommendations handle "never schedule in
-        # the past" at the recommendation layer instead, so the helper itself
-        # must keep exposing full past-day windows.
+    def test_elapsed_days_are_not_free(self):
         from app.services.scheduling.free_slots import find_free_slots
 
         slots = find_free_slots(
@@ -185,14 +184,225 @@ class TestFindFreeSlots:
             timezone="UTC",
         )
         days = {slot.start.date() for slot in slots}
-        # Full past days are treated as plain windows here; the recommender
-        # drops them to avoid starvation. Only today's window is clamped to now.
-        assert date(2026, 9, 20) in days
-        assert date(2026, 9, 21) in days
-        assert date(2026, 9, 22) in days
+        assert days == {date(2026, 9, 22)}
 
 
 class TestDailyRecommendationsEndpoint:
+    def _daily(self, client, token, **overrides):
+        payload = {
+            "timezone": "UTC",
+            "start_date": "2026-09-22",
+            "end_date": "2026-09-22",
+        }
+        payload.update(overrides)
+        response = client.post(
+            "/api/v1/recommendations/daily", json=payload, headers=_auth(token)
+        )
+        assert response.status_code == 200, response.text
+        return response.json()
+
+    def _preferences(self, client, token, **overrides):
+        payload = {"work_hours_start": 9, "work_hours_end": 17, "buffer_minutes": 0}
+        payload.update(overrides)
+        response = client.put("/api/v1/preferences", json=payload, headers=_auth(token))
+        assert response.status_code == 200, response.text
+
+    @pytest.mark.parametrize("date_value, zone, expected", [
+        ("2026-09-23T00:00:00Z", "America/Los_Angeles", "2026-09-22"),
+        ("2026-09-22T23:00:00Z", "Asia/Tokyo", "2026-09-23"),
+        ("2026-09-22", "America/Los_Angeles", "2026-09-22"),
+        ("2026-09-22T00:00:00", "Asia/Tokyo", "2026-09-22"),
+    ])
+    def test_boundaries_use_request_calendar_day(self, client, date_value, zone, expected):
+        token = _login(client)["access_token"]
+        body = self._daily(client, token, timezone=zone, start_date=date_value, end_date=date_value)
+        assert [day["date"] for day in body["days"]] == [expected]
+
+    @pytest.mark.parametrize("payload", [
+        {"timezone": "Not/AZone"},
+        {"start_date": "2026-09-23", "end_date": "2026-09-22"},
+        {"start_date": "2026-09-22", "end_date": "2027-09-23"},
+        {"end_date": "2028-09-22"},
+    ])
+    def test_invalid_ranges_and_timezone_are_422(self, client, payload):
+        token = _login(client)["access_token"]
+        response = client.post("/api/v1/recommendations/daily", json=payload, headers=_auth(token))
+        assert response.status_code == 422
+
+    def test_native_growing_coverage_range_is_supported(self, client):
+        token = _login(client)["access_token"]
+        body = self._daily(client, token, start_date="2026-09-01", end_date="2027-08-31")
+        assert len(body["days"]) == 365
+        assert body["days"][0]["date"] == "2026-09-01"
+
+    def test_internal_block_blocks_time_and_reduces_remaining_work(self, client):
+        token = _login(client)["access_token"]
+        self._preferences(client, token, max_daily_hours=2, buffer_minutes=15)
+        task = _create(client, token, estimated_duration=120)
+        response = client.post("/api/v1/calendar/blocks", headers=_auth(token), json={
+            "task_id": task["id"], "title": "Committed",
+            "start_at": "2026-09-22T09:00:00Z", "end_at": "2026-09-22T10:00:00Z",
+        })
+        assert response.status_code == 201
+        body = self._daily(client, token)
+        assert body["days"][0]["available_minutes"] == 60
+        item, = body["days"][0]["items"]
+        assert item["minutes"] == 60
+        assert _parse_at(item["start_at"]) == NOW + timedelta(minutes=75)
+        # Echoed device busy times must not count committed work a second time.
+        echoed = self._daily(client, token, busy_times=[{
+            "start": "2026-09-22T09:00:00Z", "end": "2026-09-22T10:00:00Z",
+        }])
+        assert echoed == body
+
+    def test_fixed_recurrence_local_overrides_and_end_date(self, client):
+        token = _login(client)["access_token"]
+        self._preferences(client, token, max_daily_hours=2)
+        fixed = _create(client, token, title="Weekly", start_at="2026-09-15T09:00:00Z",
+                        end_at="2026-09-15T10:00:00Z", repeat_weekdays=[2],
+                        repeat_ends_on="2026-09-22T23:00:00Z")
+        response = client.patch(f"/api/v1/tasks/{fixed['id']}/occurrence", headers=_auth(token), json={
+            "date": "2026-09-22", "scope": "this_event_only", "timezone": "UTC",
+            "start_at": "2026-09-22T09:30:00Z", "end_at": "2026-09-22T11:00:00Z",
+        })
+        assert response.status_code == 200
+        _create(client, token, title="Flexible", estimated_duration=30)
+        body = self._daily(client, token)
+        assert body["days"][0]["available_minutes"] == 30
+        item, = body["days"][0]["items"]
+        assert _parse_at(item["end_at"]) == NOW + timedelta(minutes=30)
+        assert item["task_title"] == "Flexible"
+        assert self._daily(client, token, start_date="2026-09-29", end_date="2026-09-29")["days"][0]["available_minutes"] == 120
+
+    def test_fixed_task_is_busy_without_a_calendar_block(self, client):
+        token = _login(client)["access_token"]
+        self._preferences(client, token)
+        _create(client, token, title="Fixed", start_at="2026-09-22T09:00:00Z", end_at="2026-09-22T10:00:00Z")
+        _create(client, token, estimated_duration=30)
+        item, = self._daily(client, token)["days"][0]["items"]
+        assert _parse_at(item["start_at"]) == NOW + timedelta(hours=1)
+
+    def test_recurrence_uses_local_weekday_and_override_key(self, client):
+        token = _login(client)["access_token"]
+        self._preferences(client, token, max_daily_hours=2)
+        # UTC Wednesday, but Tuesday evening in Los Angeles. The recurring
+        # Tuesday event must occupy Tuesday's local work window.
+        fixed = _create(
+            client, token, title="Local weekly", repeat_weekdays=[2],
+            start_at="2026-09-16T01:00:00Z", end_at="2026-09-16T02:00:00Z",
+        )
+        response = client.patch(
+            f"/api/v1/tasks/{fixed['id']}/occurrence", headers=_auth(token), json={
+                "date": "2026-09-22", "scope": "this_event_only",
+                "timezone": "America/Los_Angeles",
+                "start_at": "2026-09-22T16:00:00Z", "end_at": "2026-09-22T17:00:00Z",
+            },
+        )
+        assert response.status_code == 200
+        _create(client, token, estimated_duration=60)
+        body = self._daily(client, token, timezone="America/Los_Angeles")
+        assert body["days"][0]["available_minutes"] == 60
+        item, = body["days"][0]["items"]
+        assert _parse_at(item["start_at"]) == _parse_at("2026-09-22T17:00:00Z")
+
+    def test_failed_allocation_does_not_consume_slots(self, client):
+        token = _login(client)["access_token"]
+        self._preferences(client, token, work_hours_end=10)
+        _create(client, token, title="Cannot finish", estimated_duration=120, priority="high")
+        _create(client, token, title="Fits", estimated_duration=60)
+        body = self._daily(client, token)
+        assert [item["task_title"] for item in body["days"][0]["items"]] == ["Fits"]
+        assert len(body["unscheduled"]) == 2
+
+    @pytest.mark.parametrize("zone, moved_start, moved_end", [
+        ("UTC", "2026-09-23T09:00:00Z", "2026-09-23T10:00:00Z"),
+        ("America/Los_Angeles", "2026-09-23T16:00:00Z", "2026-09-23T17:00:00Z"),
+    ])
+    def test_moved_override_preserves_absolute_dates(
+        self, client, zone, moved_start, moved_end
+    ):
+        token = _login(client)["access_token"]
+        self._preferences(client, token, max_daily_hours=2)
+        fixed = _create(
+            client, token, title="Moved weekly", repeat_weekdays=[2],
+            start_at="2026-09-15T16:00:00Z", end_at="2026-09-15T17:00:00Z",
+        )
+        response = client.patch(
+            f"/api/v1/tasks/{fixed['id']}/occurrence", headers=_auth(token), json={
+                "date": "2026-09-22", "scope": "this_event_only", "timezone": zone,
+                "start_at": moved_start, "end_at": moved_end,
+            },
+        )
+        assert response.status_code == 200
+        _create(client, token, title="Flexible", estimated_duration=60)
+
+        original = self._daily(client, token, timezone=zone)
+        assert original["days"][0]["available_minutes"] == 120
+        # The source date is outside this single-day request, and Wednesday
+        # is not a repeat weekday. The absolute override must still be busy.
+        moved = self._daily(
+            client, token, timezone=zone,
+            start_date="2026-09-23", end_date="2026-09-23",
+        )
+        assert moved["days"][0]["available_minutes"] == 60
+        item, = moved["days"][0]["items"]
+        assert _parse_at(item["start_at"]) == _parse_at(moved_end)
+
+        combined = self._daily(
+            client, token, timezone=zone, end_date="2026-09-23"
+        )
+        assert [day["available_minutes"] for day in combined["days"]] == [120, 60]
+
+    def test_fragmented_windows_do_not_span_busy_gap(self, client):
+        token = _login(client)["access_token"]
+        self._preferences(client, token, work_hours_end=11)
+        _create(client, token, estimated_duration=60)
+        body = self._daily(client, token, busy_times=[{
+            "start": "2026-09-22T09:30:00Z", "end": "2026-09-22T10:30:00Z",
+        }])
+        assert body["days"][0]["available_minutes"] == 60
+        assert body["days"][0]["items"] == []
+        assert body["unscheduled"][0]["minutes"] == 60
+
+    def test_existing_steps_fit_separate_contiguous_slots(self, client):
+        token = _login(client)["access_token"]
+        self._preferences(client, token, work_hours_end=11)
+        _create(client, token, estimated_duration=60, description="1. Draft\n2. Review")
+        body = self._daily(client, token, busy_times=[{
+            "start": "2026-09-22T09:30:00Z", "end": "2026-09-22T10:30:00Z",
+        }])
+        items = body["days"][0]["items"]
+        assert [item["part_index"] for item in items] == [0, 1]
+        assert [_parse_at(item["start_at"]) for item in items] == [NOW, NOW + timedelta(minutes=90)]
+        assert all(_parse_at(item["end_at"]) - _parse_at(item["start_at"]) == timedelta(minutes=item["minutes"]) for item in items)
+
+    @pytest.mark.parametrize("minutes, scheduled", [(30, True), (31, False)])
+    def test_exact_deadline_time(self, client, minutes, scheduled):
+        token = _login(client)["access_token"]
+        self._preferences(client, token)
+        _create(client, token, estimated_duration=minutes, deadline="2026-09-22T09:30:00Z")
+        body = self._daily(client, token)
+        assert bool(body["days"][0]["items"]) is scheduled
+        assert bool(body["unscheduled"]) is not scheduled
+
+    def test_small_remaining_duration_and_buffers_are_exact(self, client):
+        token = _login(client)["access_token"]
+        self._preferences(client, token, buffer_minutes=15)
+        first = _create(client, token, estimated_duration=30, priority="high")
+        assert client.patch(f"/api/v1/tasks/{first['id']}", json={"actual_duration": 25}, headers=_auth(token)).status_code == 200
+        _create(client, token, title="Next", estimated_duration=30)
+        items = self._daily(client, token)["days"][0]["items"]
+        assert [item["minutes"] for item in items] == [5, 30]
+        assert _parse_at(items[1]["start_at"]) - _parse_at(items[0]["end_at"]) == timedelta(minutes=15)
+
+    def test_after_work_hours_has_no_today_recommendations(self, client):
+        token = _login(client)["access_token"]
+        self._preferences(client, token, work_hours_start=5, work_hours_end=8)
+        _create(client, token, estimated_duration=30)
+        body = self._daily(client, token)
+        assert body["days"][0]["available_minutes"] == 0
+        assert body["days"][0]["items"] == []
+
     def test_requires_authentication(self, client):
         response = client.post("/api/v1/recommendations/daily", json={})
         assert response.status_code == 401
@@ -602,10 +812,8 @@ class TestDailyRecommendationsEndpoint:
             f"days used {sorted(set(part_days))}"
         )
 
-    def test_big_multi_part_tasks_still_fit(self, client):
-        # Regression: many large multi-part tasks with a near deadline must all
-        # fit into the remaining free time (before the indexing change, empty
-        # days were left blank and parts spilled into "doesn't fit this window").
+    def test_big_multi_part_tasks_respect_daily_cap(self, client):
+        # Raw free time cannot override daily caps or the exact deadline.
         data = _login(client)
         deadline = (NOW + timedelta(days=4)).isoformat()
         for title, duration, priority in [
@@ -652,9 +860,11 @@ class TestDailyRecommendationsEndpoint:
         )
         assert response.status_code == 200
         body = response.json()
-        assert body["unscheduled"] == [], (
-            "all parts must fit; nothing may spill into unscheduled"
-        )
+        assert body["unscheduled"], "work exceeding capped deadline capacity cannot fit"
+        for day in body["days"]:
+            assert sum(item["minutes"] for item in day["items"]) <= 480
+            for item in day["items"]:
+                assert _parse_at(item["end_at"]) <= _parse_at(deadline)
         # Each task's parts appear in order across the window.
         for day_index in range(len(body["days"])):
             seen: dict[str, int] = {}

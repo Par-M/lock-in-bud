@@ -9,6 +9,7 @@ struct FocusSessionEditSheet: View {
     @State private var startDate: Date
     @State private var endDate: Date
     @State private var isSaving = false
+    @State private var saveError: String?
 
     init(session: FocusSession) {
         self.session = session
@@ -23,6 +24,9 @@ struct FocusSessionEditSheet: View {
     var body: some View {
         NavigationStack {
             Form {
+                if let saveError {
+                    Text(saveError).foregroundStyle(.red)
+                }
                 Section("When did it happen?") {
                     DatePicker("Started", selection: $startDate)
                     DatePicker("Ended", selection: $endDate)
@@ -56,7 +60,11 @@ struct FocusSessionEditSheet: View {
     private func save() async {
         isSaving = true
         defer { isSaving = false }
-        await focus.updateSession(id: session.id, startedAt: startDate, endedAt: endDate)
-        dismiss()
+        saveError = nil
+        if await focus.updateSession(id: session.id, startedAt: startDate, endedAt: endDate) != nil {
+            dismiss()
+        } else {
+            saveError = focus.errorMessage
+        }
     }
 }

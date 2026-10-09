@@ -11,6 +11,7 @@ enum TaskEndpoint: Endpoint {
         order: String,
         since: Date? = nil
     )
+    case get(UUID)
     case create(TaskCreateRequest)
     case parse(TaskParseRequest)
     case update(id: UUID, request: TaskUpdateRequest)
@@ -33,7 +34,7 @@ enum TaskEndpoint: Endpoint {
             return "/api/v1/tasks"
         case .parse:
             return "/api/v1/tasks/parse"
-        case .update(let id, _):
+        case .get(let id), .update(let id, _):
             return "/api/v1/tasks/\(id.uuidString.lowercased())"
         case .delete(let id):
             return "/api/v1/tasks/\(id.uuidString.lowercased())"
@@ -60,7 +61,7 @@ enum TaskEndpoint: Endpoint {
 
     var method: HTTPMethod {
         switch self {
-        case .list, .overdue:
+        case .list, .overdue, .get:
             return .get
         case .create:
             return .post

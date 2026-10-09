@@ -4,13 +4,16 @@ struct ScheduleProposalView: View {
     @Environment(ScheduleService.self) private var scheduleService
     @Environment(\.dismiss) private var dismiss
 
-    @State private var errorDismissed = false
     @State private var redoingItemID: String?
 
     var body: some View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
+                    if let error = scheduleService.errorMessage {
+                        Label(error, systemImage: "exclamationmark.triangle")
+                            .foregroundStyle(.red)
+                    }
                     if let message = scheduleService.proposal?.message {
                         Label(message, systemImage: "sparkles")
                             .font(.headline)
@@ -228,8 +231,7 @@ struct ScheduleProposalView: View {
     }
 
     private func reject(_ proposal: ScheduleProposal) async {
-        await scheduleService.reject(proposal)
-        dismiss()
+        if await scheduleService.reject(proposal) { dismiss() }
     }
 }
 

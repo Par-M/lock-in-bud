@@ -11,7 +11,7 @@ API_BASE_URL=http://localhost:8000
 NEXT_PUBLIC_GOOGLE_CLIENT_ID=your-web-google-client-id.apps.googleusercontent.com
 ```
 
-The Google client ID must match the backend's `GOOGLE_CLIENT_ID`. In Google Cloud, use a **Web application** OAuth client and add `http://localhost:3000` and the deployed website as authorized JavaScript origins. If the native app currently uses a different audience, configure and test an explicitly allowed web audience on the backend before public release; do not disable audience verification.
+Set the backend's `GOOGLE_WEB_CLIENT_ID` to the website's `NEXT_PUBLIC_GOOGLE_CLIENT_ID`. Keep `GOOGLE_CLIENT_ID` set to the native app's client ID. The backend verifies Google signatures, expiry, issuer, and membership in this explicit audience allowlist. In Google Cloud, use a **Web application** OAuth client and add `http://localhost:3000` and the deployed website as authorized JavaScript origins. Do not disable audience verification.
 
 ```bash
 npm ci
@@ -32,7 +32,7 @@ Session tokens stay in HTTP-only, SameSite cookies. A same-origin server proxy a
 
 Do not put the database URL, JWT secret, or Gemini key in the web project. The server-side API proxy means browser-to-backend CORS changes are not required. You can add a custom domain later under the web project's Settings > Domains; also authorize that origin in Google Cloud.
 
-The backend must be healthy first. Its production database currently needs the chat-table migration. Run the existing `backend/scripts/migrate.py` workflow against the intended database through a controlled deployment step, then verify `/openapi.json`. A Vercel deployment marked Ready does not guarantee API runtime health.
+The backend must be healthy first. Run the existing `backend/scripts/migrate.py` workflow against the intended database through a controlled deployment step when migrations are pending, then verify `/openapi.json`. A Vercel deployment marked Ready does not guarantee API runtime health.
 
 From `backend/`, using the real production database URL supplied securely as `DATABASE_URL`:
 
@@ -42,11 +42,13 @@ From `backend/`, using the real production database URL supplied securely as `DA
 ./.venv/bin/python -m scripts.migrate --check
 ```
 
-The expected revision is `20251004130000`. Do not use a redacted Vercel environment export as a database connection string. Back up the database before production migrations. The backend also needs `GEMINI_API_KEY` for assistant/recommendation AI features; it was absent from the inspected production configuration. Production data and environment values have not been changed by this PR.
+The expected revision is `20251004130000`. Do not use a redacted Vercel environment export as a database connection string. Back up the database before production migrations. The backend also needs `GEMINI_API_KEY` for AI features. All Gemini providers use the configured `GEMINI_CHAT_MODEL`, defaulting to `gemini-3.5-flash-lite`.
 
 ## Installation And Offline Behavior
 
-The manifest, PNG icons, and service worker support Add to Home Screen / browser installation. On iPhone, use Safari > Share > Add to Home Screen. The service worker caches only public icons and an offline page, never account data or API responses. Full offline task editing and web push are not included. Focus timer state persists locally per account, but saving requires connectivity. Timers synchronize across tabs using browser storage and Web Locks. An interrupted write is marked for manual review rather than automatically retried, because the backend does not yet support idempotent focus writes.
+The manifest, PNG icons, and service worker support Add to Home Screen / browser installation. On iPhone, use Safari > Share > Add to Home Screen. The service worker caches only the anonymous public app shell, hashed static assets, icons, and offline fallback, never account data or API responses. After connecting once, account-UUID-scoped IndexedDB snapshots support offline task reading, creation, editing, and deletion. Revision-checked outboxes replay stable operation IDs and retain conflicts for review. Task transitions, occurrence actions, rescheduling, and other mutations still require connectivity. Browser storage and Web Locks coordinate writes across tabs.
+
+Focus runs use stable session IDs and atomically record whole task minutes on the backend. Interrupted new saves can be retried explicitly with the same ID and payload; legacy uncertain saves without IDs require manual review. Editing or deleting a historical session does not retroactively adjust task minutes. Hard deletion removes that session's retry protection, so do not replay a deleted session's operation ID.
 
 ## Verification
 
@@ -61,4 +63,6 @@ Browser tests mock the API to verify mobile/desktop layout and core interactions
 
 ## Parity Boundaries
 
-The core navigation, colors, task fields, habits, schedule blocks/recommendations, focus logging, and chat mirror the app. This is not a pixel-for-pixel SwiftUI port. Device calendars (EventKit), APNs, widgets, advanced schedule review/rescheduling, chart details, and native offline queues are not replicated. The current merged assistant supports conversation text but does not execute task-changing tool calls. Both clients read and write the same account data; active timers and appearance are browser-local.
+The clients expose the same core online task, habit, schedule-proposal, block, occurrence, reschedule, focus-history, assistant, and notification-preference operations. See `../docs/client-parity.md` for the remaining boundaries rather than treating this as a pixel-for-pixel SwiftUI port. The assistant reads planner data, streams replies, and proposes changes that execute only after explicit confirmation. It supports conversation management, preserved drafts and retries, offline history, task citations, optional browser dictation and confirmed memory. See `../docs/assistant.md` for the protocol and deployment migration. Both clients read and write the same account data; active timers, category suggestions, and appearance are device-local.
+
+External availability uses EventKit on iOS and explicit Google Calendar read-only consent on web. Enable the Google Calendar API and configure consent for `calendar.events.readonly` and `calendar.calendarlist.readonly` before using the web import. Tokens remain in browser memory; only busy start/end intervals reach the backend. Imports are bounded snapshots, not live sync, and exclude all-day, cancelled, and transparent events.

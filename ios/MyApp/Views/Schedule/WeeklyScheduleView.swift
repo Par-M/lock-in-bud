@@ -233,7 +233,7 @@ struct WeeklyScheduleView: View {
     private func generatePlan() async {
         errorDismissed = false
         let busyTimes = busyEvents
-            .filter { !calendarService.isIgnored($0) }
+            .filter { !$0.isAllDay && !calendarService.isIgnored($0) }
             .map { BusyTimeRequest(start: $0.start, end: $0.end) }
         await scheduleService.generate(
             startDate: visibleStart,
@@ -922,7 +922,9 @@ private var dayContent: some View {
     // MARK: - Events
 
     private func events(for day: Date) -> [CalendarEventItem] {
-        let external = busyEvents.filter { calendar.isDate($0.start, inSameDayAs: day) }
+        let dayStart = calendar.startOfDay(for: day)
+        let dayEnd = calendar.date(byAdding: .day, value: 1, to: dayStart) ?? day
+        let external = busyEvents.filter { $0.start < dayEnd && $0.end > dayStart }
         return (external + appEvents(for: day)).sorted { $0.start < $1.start }
     }
 
@@ -933,7 +935,7 @@ private var dayContent: some View {
         let dayEnd = calendar.date(byAdding: .day, value: 1, to: dayStart) ?? day
 
         let dayBlocks = scheduleService.blocks.filter {
-            $0.startAt >= dayStart && $0.startAt < dayEnd
+            $0.startAt < dayEnd && $0.endAt > dayStart
         }
         let blockItems = dayBlocks.map { block in
             CalendarEventItem(
@@ -946,54 +948,26 @@ private var dayContent: some View {
         }
         let blockTaskIds = Set(dayBlocks.map(\.taskId))
 
-        let weekday = (calendar.component(.weekday, from: day) - 1 + 7) % 7
-        let taskItems = taskService.tasks.compactMap { task -> CalendarEventItem? in
+        let taskItems = taskService.tasks.flatMap { task -> [CalendarEventItem] in
             guard
                 !task.isArchived,
                 task.status != .completed,
                 let start = task.startAt,
                 task.endAt != nil
-            else { return nil }
-            if blockTaskIds.contains(task.id) { return nil }
+            else { return [] }
+            if blockTaskIds.contains(task.id) { return [] }
             let weekdays = task.repeatWeekdays ?? []
             if weekdays.isEmpty {
-                guard calendar.isDate(start, inSameDayAs: day) else { return nil }
-                return repeatingEvent(from: task, on: day)
+                guard let end = task.endAt, start < dayEnd, end > dayStart else { return [] }
+                return [CalendarEventItem(
+                    id: "app-task-\(task.id.uuidString)-\(Int(start.timeIntervalSince1970))",
+                    title: task.title, start: start, end: end, isAllDay: false
+                )]
             }
-            guard weekdays.contains(weekday) else { return nil }
-            guard isWithinRepeat(task: task, day: day) else { return nil }
-            return repeatingEvent(from: task, on: day)
+            return CalendarEventItem.repeatingEvents(for: task, on: day)
         }
 
         return blockItems + taskItems
-    }
-
-    private func repeatingEvent(from task: TaskItem, on day: Date) -> CalendarEventItem {
-        let override = task.repeatOverrides?[OccurrenceDateKey.key(for: day)]
-        let start = override?.startAt ?? task.startAt ?? day
-        let end = override?.endAt ?? task.endAt ?? day.addingTimeInterval(30 * 60)
-        let startTime = calendar.dateComponents([.hour, .minute], from: start)
-        let endTime = calendar.dateComponents([.hour, .minute], from: end)
-        let s = calendar.date(bySettingHour: startTime.hour ?? 0, minute: startTime.minute ?? 0, second: 0, of: day) ?? day
-        let e = calendar.date(bySettingHour: endTime.hour ?? 0, minute: endTime.minute ?? 0, second: 0, of: day) ?? s
-        return CalendarEventItem(
-            id: "app-task-\(task.id.uuidString)-\(Int(s.timeIntervalSince1970))",
-            title: task.title,
-            start: s,
-            end: e,
-            isAllDay: false
-        )
-    }
-
-    private func isWithinRepeat(task: TaskItem, day: Date) -> Bool {
-        guard let start = task.startAt else { return false }
-        let dayStart = calendar.startOfDay(for: day)
-        let taskStart = calendar.startOfDay(for: start)
-        guard dayStart >= taskStart else { return false }
-        if let endsOn = task.repeatEndsOn {
-            guard dayStart <= calendar.startOfDay(for: endsOn) else { return false }
-        }
-        return true
     }
 
     private func isAppEvent(_ event: CalendarEventItem) -> Bool {
@@ -1106,7 +1080,7 @@ private var dayContent: some View {
                     Button {
                         editingOccurrence = OccurrenceEditContext(
                             task: task,
-                            date: calendar.startOfDay(for: event.start)
+                            date: event.occurrenceDate ?? calendar.startOfDay(for: event.start)
                         )
                     } label: {
                         content
@@ -1151,7 +1125,7 @@ private var dayContent: some View {
 
     private func occurrenceCompleted(_ event: CalendarEventItem) -> Bool {
         guard let task = task(for: event) else { return false }
-        guard let override = task.repeatOverrides?[OccurrenceDateKey.key(for: event.start)] else {
+        guard let override = task.repeatOverrides?[OccurrenceDateKey.key(for: event.occurrenceDate ?? event.start)] else {
             return false
         }
         return override.completed == true

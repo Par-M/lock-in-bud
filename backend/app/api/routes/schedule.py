@@ -71,7 +71,7 @@ def generate_schedule(
     if recommendation.failure_reason:
         message = (
             "Scheduling was temporarily unavailable. The current schedule was "
-            "preserved and a new plan will be attempted automatically."
+            "preserved. Try generating again."
         )
     elif meta.get("overcommitted"):
         message = (
@@ -99,8 +99,9 @@ def generate_schedule(
 def replan(
     payload: ScheduleGenerateRequest,
     service: SchedulingService = Depends(_service),
+    notification_service: NotificationService = Depends(_notification_service),
 ) -> ScheduleProposal:
-    return generate_schedule(payload, service)
+    return generate_schedule(payload, service, notification_service)
 
 
 @router.get("/recommendations", response_model=RecommendationListResponse)

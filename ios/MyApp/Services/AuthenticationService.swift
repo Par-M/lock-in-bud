@@ -32,9 +32,11 @@ final class AuthenticationService {
 
     func restoreSession() async {
         guard let stored = keychain.loadSession() else {
+            FocusTimerStarter.synchronizeAccount(nil)
             state = .signedOut
             return
         }
+        FocusTimerStarter.synchronizeAccount(stored.user.id)
 
         do {
             user = try await apiClient.me()
@@ -42,6 +44,7 @@ final class AuthenticationService {
         } catch {
             if isDefinitiveSignOut(error) {
                 keychain.clear()
+                FocusTimerStarter.synchronizeAccount(nil)
                 user = nil
                 state = .signedOut
             } else {
@@ -65,6 +68,7 @@ final class AuthenticationService {
     /// before retrying, so revalidation is invisible to the user.
     func revalidateSession() async {
         guard keychain.loadSession() != nil else {
+            FocusTimerStarter.synchronizeAccount(nil)
             if state != .signedOut {
                 user = nil
                 state = .signedOut
@@ -78,6 +82,7 @@ final class AuthenticationService {
         } catch {
             if isDefinitiveSignOut(error) {
                 keychain.clear()
+                FocusTimerStarter.synchronizeAccount(nil)
                 user = nil
                 state = .signedOut
             }
@@ -98,18 +103,19 @@ final class AuthenticationService {
     }
 
     func signOut() {
+        FocusTimerStarter.synchronizeAccount(nil)
         user = nil
         state = .signedOut
         localStore?.clearAll()
 
-        let hasSession = keychain.loadSession() != nil
+        let signingOutUserID = keychain.loadSession()?.user.id
         Task {
-            if hasSession {
+            if signingOutUserID != nil {
                 try? await apiClient.logout()
             }
             await NotificationService.shared.unregisterDevice()
             NotificationService.shared.clearLocalState()
-            keychain.clear()
+            if keychain.loadSession()?.user.id == signingOutUserID { keychain.clear() }
         }
     }
 
@@ -120,6 +126,10 @@ final class AuthenticationService {
     }
 
     private func apply(_ session: AuthSession) {
+        if let previous = keychain.loadSession(), previous.user.id != session.user.id {
+            localStore?.clearAll()
+        }
+        FocusTimerStarter.synchronizeAccount(session.user.id)
         keychain.save(session)
         user = session.user
         state = .signedIn

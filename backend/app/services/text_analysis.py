@@ -90,11 +90,11 @@ class GeminiTextAnalysisProvider:
     def __init__(
         self,
         api_key: str | None = None,
-        model: str = "gemini-2.0-flash",
+        model: str | None = None,
         timeout: float = 45.0,
     ) -> None:
         self.api_key = api_key or settings.gemini_api_key
-        self.model = model
+        self.model = model or settings.gemini_chat_model
         self.timeout = timeout
 
     def analyze_text(self, text: str) -> AnalysisResult:
@@ -113,7 +113,7 @@ class GeminiTextAnalysisProvider:
         try:
             response = httpx.post(
                 f"{self.BASE_URL}/models/{self.model}:generateContent",
-                params={"key": self.api_key},
+                headers={"x-goog-api-key": self.api_key},
                 json={
                     "contents": [
                         {"role": "user", "parts": [{"text": prompt}]}
@@ -136,6 +136,13 @@ class GeminiTextAnalysisProvider:
             if not raw:
                 raise TextAnalysisError("Gemini returned an empty response")
             data = json.loads(raw)
+            if (
+                not isinstance(data, dict)
+                or not isinstance(data.get("insight", ""), str)
+                or not isinstance(data.get("tags", []), list)
+                or any(not isinstance(tag, str) for tag in data.get("tags", []))
+            ):
+                raise TextAnalysisError("Invalid Gemini analysis response")
             return AnalysisResult(
                 insight=str(data.get("insight", "")).strip()
                 or "No insight returned.",
@@ -145,10 +152,14 @@ class GeminiTextAnalysisProvider:
                     if str(tag).strip()
                 ],
             )
-        except httpx.HTTPError as exc:
-            raise TextAnalysisError(f"Gemini request failed: {exc}") from exc
-        except (TypeError, ValueError, json.JSONDecodeError) as exc:
-            raise TextAnalysisError(f"Could not parse Gemini response: {exc}") from exc
+        except httpx.HTTPStatusError as exc:
+            raise TextAnalysisError(
+                f"Gemini request failed (HTTP {exc.response.status_code})"
+            ) from None
+        except httpx.HTTPError:
+            raise TextAnalysisError("Gemini request failed") from None
+        except (KeyError, IndexError, TypeError, ValueError, AttributeError):
+            raise TextAnalysisError("Could not parse Gemini response") from None
 
     def parse_task(self, text: str, timezone: str = "UTC") -> ParsedTask:
         if not self.api_key:
@@ -182,7 +193,7 @@ class GeminiTextAnalysisProvider:
         try:
             response = httpx.post(
                 f"{self.BASE_URL}/models/{self.model}:generateContent",
-                params={"key": self.api_key},
+                headers={"x-goog-api-key": self.api_key},
                 json={
                     "contents": [
                         {"role": "user", "parts": [{"text": prompt}]}
@@ -206,10 +217,14 @@ class GeminiTextAnalysisProvider:
                 raise TextAnalysisError("Gemini returned an empty response")
             data = json.loads(raw)
             return self._parsed_task(data)
-        except httpx.HTTPError as exc:
-            raise TextAnalysisError(f"Gemini request failed: {exc}") from exc
-        except (TypeError, ValueError, json.JSONDecodeError) as exc:
-            raise TextAnalysisError(f"Could not parse Gemini response: {exc}") from exc
+        except httpx.HTTPStatusError as exc:
+            raise TextAnalysisError(
+                f"Gemini request failed (HTTP {exc.response.status_code})"
+            ) from None
+        except httpx.HTTPError:
+            raise TextAnalysisError("Gemini request failed") from None
+        except (KeyError, IndexError, TypeError, ValueError, AttributeError):
+            raise TextAnalysisError("Could not parse Gemini response") from None
 
     def morning_message(self, reflection_text: str) -> str:
         if not self.api_key:
@@ -227,7 +242,7 @@ class GeminiTextAnalysisProvider:
         try:
             response = httpx.post(
                 f"{self.BASE_URL}/models/{self.model}:generateContent",
-                params={"key": self.api_key},
+                headers={"x-goog-api-key": self.api_key},
                 json={
                     "contents": [
                         {"role": "user", "parts": [{"text": prompt}]}
@@ -250,14 +265,28 @@ class GeminiTextAnalysisProvider:
             if not raw:
                 raise TextAnalysisError("Gemini returned an empty response")
             data = json.loads(raw)
+            if not isinstance(data, dict) or not isinstance(data.get("message", ""), str):
+                raise TextAnalysisError("Invalid Gemini morning message response")
             message = str(data.get("message", "")).strip()
             return message or "Good morning — make today count."
-        except httpx.HTTPError as exc:
-            raise TextAnalysisError(f"Gemini request failed: {exc}") from exc
-        except (TypeError, ValueError, json.JSONDecodeError) as exc:
-            raise TextAnalysisError(f"Could not parse Gemini response: {exc}") from exc
+        except httpx.HTTPStatusError as exc:
+            raise TextAnalysisError(
+                f"Gemini request failed (HTTP {exc.response.status_code})"
+            ) from None
+        except httpx.HTTPError:
+            raise TextAnalysisError("Gemini request failed") from None
+        except (KeyError, IndexError, TypeError, ValueError, AttributeError):
+            raise TextAnalysisError("Could not parse Gemini response") from None
 
     def _parsed_task(self, data: dict) -> ParsedTask:
+        if not isinstance(data, dict):
+            raise TextAnalysisError("Gemini task response must be an object")
+        for key in ("title", "description", "deadline", "priority", "category", "notes"):
+            if data.get(key) is not None and not isinstance(data[key], str):
+                raise TextAnalysisError("Gemini task fields must be text")
+        duration = data.get("estimated_duration")
+        if duration is not None and (isinstance(duration, bool) or not isinstance(duration, (int, float, str))):
+            raise TextAnalysisError("Invalid Gemini task duration")
         raw_title = str(data.get("title", "")).strip()
         title = raw_title or "Untitled task"
         deadline_raw = data.get("deadline")
@@ -271,7 +300,7 @@ class GeminiTextAnalysisProvider:
                     parsed = parsed.replace(tzinfo=ZoneInfo("UTC"))
                 deadline = parsed
             except ValueError:
-                deadline = None
+                raise TextAnalysisError("Invalid Gemini task deadline") from None
         duration = data.get("estimated_duration")
         estimated_duration = (
             int(duration) if isinstance(duration, (int, float, str)) and str(duration).strip().lstrip("-").isdigit() else None

@@ -11,6 +11,8 @@ from pydantic import model_validator
 
 
 class FocusSessionCreate(BaseModel):
+    session_id: uuid.UUID | None = None
+    record_task_time: bool = False
     task_id: uuid.UUID | None = None
     started_at: datetime
     ended_at: datetime

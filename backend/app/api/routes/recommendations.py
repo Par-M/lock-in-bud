@@ -31,12 +31,15 @@ def daily_recommendations(
     payload: DailyRecommendationsRequest,
     service: RecommendationService = Depends(_service),
 ) -> DailyRecommendationsResponse:
-    result = service.daily_recommendations(
-        timezone_name=payload.timezone,
-        start_date=payload.start_date.date() if payload.start_date else None,
-        end_date=payload.end_date.date() if payload.end_date else None,
-        busy_times=payload.busy_times,
-    )
+    try:
+        result = service.daily_recommendations(
+            timezone_name=payload.timezone,
+            start_date=payload.start_date,
+            end_date=payload.end_date,
+            busy_times=payload.busy_times,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     return DailyRecommendationsResponse.model_validate(result)
 
 

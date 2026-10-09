@@ -1,6 +1,14 @@
 import Foundation
 
 enum JSONCoding {
+    static func calendarDay(_ date: Date, timezone: String) -> String {
+        let formatter = makeDateFormatter()
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.timeZone = TimeZone(identifier: timezone) ?? .current
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter.string(from: date)
+    }
+
     static func makeDateFormatter() -> DateFormatter {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")

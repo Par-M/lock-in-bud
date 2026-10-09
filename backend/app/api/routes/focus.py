@@ -15,8 +15,10 @@ from app.schemas.reflection import FocusSessionCreate
 from app.schemas.reflection import FocusSessionResponse
 from app.schemas.reflection import FocusSessionUpdate
 from app.schemas.reflection import FocusSummaryResponse
+from app.services.focus_service import FocusSessionConflictError
 from app.services.focus_service import FocusSessionNotFoundError
 from app.services.focus_service import FocusService
+from app.services.focus_service import FocusTaskNotFoundError
 
 router = APIRouter(prefix="/focus", tags=["focus"])
 
@@ -44,7 +46,14 @@ def create_focus_session(
     payload: FocusSessionCreate,
     service: FocusService = Depends(_service),
 ) -> FocusSessionResponse:
-    return service.create_focus_session(payload)
+    try:
+        return service.create_focus_session(payload)
+    except FocusTaskNotFoundError as exc:
+        _handle_not_found(exc)
+    except FocusSessionConflictError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail=str(exc),
+        ) from exc
 
 
 @router.get("/sessions", response_model=list[FocusSessionResponse])

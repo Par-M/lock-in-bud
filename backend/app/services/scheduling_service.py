@@ -2,6 +2,7 @@ import copy
 import uuid
 from datetime import date
 from datetime import datetime
+from datetime import time
 from datetime import timedelta
 from datetime import timezone
 from zoneinfo import ZoneInfo
@@ -25,6 +26,7 @@ from app.services.scheduling.context import SchedulingContext
 from app.services.scheduling.context import TaskContext
 from app.services.scheduling.context import TimeSlot
 from app.services.scheduling.free_slots import find_free_slots
+from app.services.scheduling.free_slots import merge_intervals
 from app.services.scheduling.providers import AIProvider
 from app.services.scheduling.providers import HeuristicProvider
 from app.services.scheduling.providers import ProviderError
@@ -95,6 +97,7 @@ class SchedulingService:
         statement = select(Task).where(
             Task.user_id == self.user_id,
             Task.is_archived.is_(False),
+            Task.deleted_at.is_(None),
             Task.status != TaskStatus.completed,
         )
         if task_ids:
@@ -169,7 +172,35 @@ class SchedulingService:
             today + timedelta(days=offset)
             for offset in range((effective_end - today).days + 1)
         ]
+        fixed_tasks = {
+            task.id: task
+            for task in self.db.scalars(select(Task).where(
+                Task.user_id == self.user_id,
+                Task.is_archived.is_(False),
+                Task.deleted_at.is_(None),
+                Task.status != TaskStatus.completed,
+                Task.start_at.is_not(None),
+                Task.end_at.is_not(None),
+            )).all()
+        }
+        fixed_tasks.update({
+            task.id: task for task in tasks
+            if task.start_at is not None and task.end_at is not None
+        })
+        new_fixed_windows = self._fixed_windows(list(fixed_tasks.values()), dates, tz)
+        tasks = [task for task in tasks if not (
+            task.repeat_weekdays and task.start_at is not None and task.end_at is not None
+        )]
         factors = self._productivity_factors(tasks)
+        remaining = {
+            task.id: max(
+                0,
+                (task.estimated_duration or preference.default_duration_minutes)
+                - (task.actual_duration or 0),
+            )
+            for task in tasks
+        }
+        tasks = [task for task in tasks if remaining[task.id] > 0]
         by_id = {task.id: task for task in tasks}
         context = SchedulingContext(
             tasks=[
@@ -178,8 +209,7 @@ class SchedulingService:
                     title=task.title,
                     deadline=task.deadline,
                     duration_minutes=max(
-                        5,
-                        round((task.estimated_duration or 30) * factors.get(task.id, 1.0)),
+                        5, round(remaining[task.id] * factors.get(task.id, 1.0))
                     ),
                     priority=task.priority,
                     energy_level=preference.energy_level,
@@ -214,7 +244,7 @@ class SchedulingService:
             self.db.scalars(
                 select(CalendarBlock).where(
                     CalendarBlock.user_id == self.user_id,
-                    CalendarBlock.completed_at.is_(None),
+                    CalendarBlock.deleted_at.is_(None),
                 )
             ).all()
         )
@@ -223,11 +253,9 @@ class SchedulingService:
         # Check which flexible pending blocks still fit in free slots (with new fixed/busy); only those that overlap need rescheduling.
         flexible_ids = {t.id for t in tasks if t.start_at is None or t.end_at is None}
         # Initial hard busy: fixed blocks + external busy + past + NEW fixed tasks windows
-        hard_blocks_initial = [b for b in existing_blocks if b.task_id not in flexible_ids]
-        new_fixed_windows = [
-            TimeSlot(t.start_at, t.end_at)
-            for t in tasks
-            if t.start_at is not None and t.end_at is not None
+        hard_blocks_initial = [
+            b for b in existing_blocks
+            if b.task_id not in flexible_ids or b.completed_at is not None
         ]
         initial_free = find_free_slots(
             dates=dates,
@@ -260,7 +288,7 @@ class SchedulingService:
 
         flexible_blocks_by_task: dict[uuid.UUID, list[CalendarBlock]] = defaultdict(list)
         for blk in existing_blocks:
-            if blk.task_id in flexible_ids:
+            if blk.task_id in flexible_ids and blk.completed_at is None:
                 flexible_blocks_by_task[blk.task_id].append(blk)
 
         # Build required duration map for checking partial (deleted part) case
@@ -301,10 +329,29 @@ class SchedulingService:
 
         # Final hard busy: fixed blocks + flexible blocks that still fit
         fluid_blocks = hard_blocks_initial + hard_flexible_blocks
+        proposed_fixed_ids = {task.id for task in context.tasks if task.is_fixed}
+        retained = merge_intervals([
+            *[
+                TimeSlot(block.start_at, block.end_at)
+                for block in fluid_blocks
+                if block.start_at is not None and block.end_at is not None
+            ],
+            *self._fixed_windows([
+                task for task in fixed_tasks.values() if task.id not in proposed_fixed_ids
+            ], dates, tz),
+        ])
+        for day in dates:
+            start = datetime.combine(day, time(), tzinfo=tz)
+            end = datetime.combine(day + timedelta(days=1), time(), tzinfo=tz)
+            context.committed_minutes_by_day[day] = sum(
+                int((min(slot.end, end) - max(slot.start, start)).total_seconds() // 60)
+                for slot in retained if slot.start < end and slot.end > start
+            )
         context.free_slots = find_free_slots(
             dates=dates,
             busy=[
                 *context.busy_times,
+                *new_fixed_windows,
                 *[
                     TimeSlot(block.start_at, block.end_at)
                     for block in fluid_blocks
@@ -325,6 +372,48 @@ class SchedulingService:
         )
         return context
 
+    def _fixed_windows(
+        self, tasks: list[Task], dates: list[date], tz: ZoneInfo
+    ) -> list[TimeSlot]:
+        windows = []
+        for task in tasks:
+            local_start = task.start_at.astimezone(tz)
+            local_end = task.end_at.astimezone(tz)
+            if not task.repeat_weekdays:
+                windows.append(TimeSlot(local_start, local_end))
+                continue
+            days = set(dates)
+            if dates[0] > date.min:
+                days.add(dates[0] - timedelta(days=1))
+            overrides = task.repeat_overrides or {}
+            # Overrides contain absolute times, including moves from outside the horizon.
+            for key, override in overrides.items():
+                if override and (override.get("start_at") or override.get("end_at")):
+                    days.add(date.fromisoformat(key))
+            for day in sorted(days):
+                if day < local_start.date() or (day.weekday() + 1) % 7 not in task.repeat_weekdays:
+                    continue
+                if task.repeat_ends_on and day > task.repeat_ends_on.astimezone(tz).date():
+                    continue
+                start = datetime.combine(day, local_start.timetz(), tzinfo=tz)
+                end = datetime.combine(
+                    day + (local_end.date() - local_start.date()),
+                    local_end.timetz(), tzinfo=tz,
+                )
+                if end <= start:
+                    end += timedelta(days=1)
+                override = overrides.get(day.isoformat()) or {}
+                times = []
+                for field, default in (("start_at", start), ("end_at", end)):
+                    value = override.get(field)
+                    parsed = datetime.fromisoformat(value.replace("Z", "+00:00")) if value else default
+                    if parsed.tzinfo is None:
+                        parsed = parsed.replace(tzinfo=tz)
+                    times.append(parsed.astimezone(tz))
+                if times[0] < times[1]:
+                    windows.append(TimeSlot(*times))
+        return windows
+
     # ------------------------------------------------------------------
     # Schedule generation
     # ------------------------------------------------------------------
@@ -333,7 +422,7 @@ class SchedulingService:
         preference = self._preferences()
         context = self._build_context(tasks, preference, request)
 
-        if not tasks:
+        if not context.tasks:
             return self._store_pending(
                 context,
                 reasoning="No active tasks to schedule.",
@@ -360,22 +449,26 @@ class SchedulingService:
         if settings.gemini_api_key:
             try:
                 result = self.provider.generate_schedule(context, prompt)
-                validation = validate_schedule(result.items, context)
+                validation = validate_schedule(result.items, context, strict_availability=True)
                 if not validation.is_valid:
                     result = self.provider.generate_schedule(context, prompt)
-                    validation = validate_schedule(result.items, context)
-            except ProviderError as exc:
+                    validation = validate_schedule(result.items, context, strict_availability=True)
+            except (ProviderError, ValueError, TypeError, AttributeError) as exc:
                 failure = str(exc)
+                result = None
 
         if result is None or (validation is not None and not validation.is_valid):
             provider_used = "heuristic_fallback"
             try:
                 result = self.heuristic.generate_schedule(context, prompt)
-                validation = validate_schedule(result.items, context)
+                validation = validate_schedule(result.items, context, strict_availability=True)
             except Exception as exc:  # pragma: no cover - defensive
                 failure = str(exc)
+                result = None
 
-        if result is None:
+        if result is None or validation is None or not validation.is_valid:
+            if validation is not None and validation.errors:
+                failure = "; ".join(validation.errors)
             return self._store_failed(context, failure, request=request)
 
         meta = self._build_meta(context, result, validation, provider_used)
@@ -449,7 +542,7 @@ class SchedulingService:
             status=RecommendationStatus.pending,
             accepted=False,
             reasoning="Schedule generation failed. The current schedule was "
-            "preserved and will be retried automatically.",
+            "preserved. Try generating again.",
             failure_reason=failure or "Unknown scheduling error",
             retry_at=datetime.now(_utc()) + timedelta(minutes=5),
             recommendation={
@@ -482,15 +575,25 @@ class SchedulingService:
         must be approved via the normal accept flow.
         """
         try:
-            # Use UTC and default horizon; _build_context will extend to deadlines
-            today = _utc_now().date()
-            request = ScheduleGenerateRequest(
-                start_date=today,
-                end_date=today + timedelta(days=DEFAULT_SCHEDULE_HORIZON_DAYS),
-                timezone="UTC",
-                busy_times=[],
-                task_ids=None,
+            request = None
+            saved = self.db.scalars(
+                select(AIRecommendation).where(AIRecommendation.user_id == self.user_id)
+                .order_by(AIRecommendation.created_at.desc(), AIRecommendation.id.desc())
             )
+            for recommendation in saved:
+                stored = recommendation.recommendation or {}
+                if not isinstance(stored, dict):
+                    continue
+                raw = stored.get("request")
+                if not isinstance(raw, dict) or not {"timezone", "busy_times"} <= raw.keys():
+                    continue
+                try:
+                    request = self._restore_request(stored)
+                except (ValueError, TypeError, KeyError, RecommendationNotAcceptableError):
+                    continue
+                break
+            if request is None:
+                return None
             rec = self.generate(request)
             if rec and rec.reasoning and trigger:
                 rec.reasoning = f"[Auto] {trigger}: " + rec.reasoning
@@ -507,31 +610,23 @@ class SchedulingService:
                 "This proposal has no stored request data, so a single "
                 "item cannot be regenerated. Generate a fresh proposal instead."
             )
-        return ScheduleGenerateRequest(
-            start_date=date.fromisoformat(raw["start_date"]),
-            end_date=date.fromisoformat(raw["end_date"]),
-            timezone=raw["timezone"],
-            busy_times=[
-                BusyTime(start=_parse(entry["start"]), end=_parse(entry["end"]))
-                for entry in raw.get("busy_times", [])
-            ],
-            task_ids=(
-                [uuid.UUID(value) for value in raw["task_ids"]]
-                if raw.get("task_ids")
-                else None
-            ),
-        )
+        return ScheduleGenerateRequest.model_validate(raw)
 
     # ------------------------------------------------------------------
     # Recommendations lifecycle
     # ------------------------------------------------------------------
-    def get_recommendation(self, recommendation_id: uuid.UUID) -> AIRecommendation:
-        recommendation = self.db.scalar(
-            select(AIRecommendation).where(
-                AIRecommendation.id == recommendation_id,
-                AIRecommendation.user_id == self.user_id,
-            )
+    def get_recommendation(
+        self, recommendation_id: uuid.UUID, *, lock: bool = False
+    ) -> AIRecommendation:
+        statement = select(AIRecommendation).where(
+            AIRecommendation.id == recommendation_id,
+            AIRecommendation.user_id == self.user_id,
         )
+        if lock:
+            statement = statement.with_for_update().execution_options(
+                populate_existing=True
+            )
+        recommendation = self.db.scalar(statement)
         if recommendation is None:
             raise RecommendationNotFoundError("Recommendation not found")
         return recommendation
@@ -552,7 +647,7 @@ class SchedulingService:
     def accept(
         self, recommendation_id: uuid.UUID
     ) -> tuple[AIRecommendation, list[CalendarBlock]]:
-        recommendation = self.get_recommendation(recommendation_id)
+        recommendation = self.get_recommendation(recommendation_id, lock=True)
         if recommendation.status != RecommendationStatus.pending:
             raise RecommendationNotAcceptableError(
                 "Only pending recommendations can be accepted"
@@ -577,8 +672,7 @@ class SchedulingService:
                     )
                 ).all()
             )
-            for ob in old_blocks:
-                self.db.delete(ob)
+            self._delete_replaced_blocks(old_blocks, items)
             self.db.flush()
 
         blocks: list[CalendarBlock] = []
@@ -593,6 +687,8 @@ class SchedulingService:
                 end_at=_parse(item["end"]),
             )
             self.db.add(block)
+            self.db.flush()
+            item["block_id"] = str(block.id)
             blocks.append(block)
             item["accepted"] = True
 
@@ -608,8 +704,27 @@ class SchedulingService:
         self.db.refresh(recommendation)
         return recommendation, blocks
 
+    def _delete_replaced_blocks(
+        self, blocks: list[CalendarBlock], items: list[dict]
+    ) -> None:
+        accepted = [item for item in items if item.get("accepted")]
+        for block in blocks:
+            # Older persisted proposals lack block IDs; match their accepted windows.
+            keep = any(
+                str(block.id) == item["block_id"]
+                if item.get("block_id")
+                else (
+                    str(block.task_id) == item["task_id"]
+                    and block.start_at == _parse(item["start"])
+                    and block.end_at == _parse(item["end"])
+                )
+                for item in accepted
+            )
+            if not keep:
+                self.db.delete(block)
+
     def reject(self, recommendation_id: uuid.UUID) -> AIRecommendation:
-        recommendation = self.get_recommendation(recommendation_id)
+        recommendation = self.get_recommendation(recommendation_id, lock=True)
         if recommendation.status != RecommendationStatus.pending:
             raise RecommendationNotAcceptableError(
                 "Only pending recommendations can be rejected"
@@ -623,7 +738,7 @@ class SchedulingService:
     def accept_item(
         self, recommendation_id: uuid.UUID, item_index: int
     ) -> tuple[AIRecommendation, list[CalendarBlock]]:
-        recommendation = self.get_recommendation(recommendation_id)
+        recommendation = self.get_recommendation(recommendation_id, lock=True)
         if recommendation.status != RecommendationStatus.pending:
             raise RecommendationNotAcceptableError(
                 "Only pending recommendations can be approved"
@@ -650,8 +765,7 @@ class SchedulingService:
                 )
             ).all()
         )
-        for ob in old_blocks:
-            self.db.delete(ob)
+        self._delete_replaced_blocks(old_blocks, items)
         self.db.flush()
 
         block = CalendarBlock(
@@ -662,6 +776,8 @@ class SchedulingService:
             end_at=_parse(item["end"]),
         )
         self.db.add(block)
+        self.db.flush()
+        item["block_id"] = str(block.id)
         item["accepted"] = True
         stored = copy.deepcopy(recommendation.recommendation or {})
         stored["items"] = items
@@ -678,12 +794,12 @@ class SchedulingService:
     def redo_item(
         self, recommendation_id: uuid.UUID, item_index: int
     ) -> AIRecommendation:
-        recommendation = self.get_recommendation(recommendation_id)
+        recommendation = self.get_recommendation(recommendation_id, lock=True)
         if recommendation.status != RecommendationStatus.pending:
             raise RecommendationNotAcceptableError(
                 "Only pending recommendations can be regenerated"
             )
-        stored = recommendation.recommendation or {}
+        stored = copy.deepcopy(recommendation.recommendation or {})
         items = stored.get("items", [])
         if not 0 <= item_index < len(items):
             raise RecommendationNotAcceptableError("Proposed item not found")
@@ -735,7 +851,9 @@ class SchedulingService:
                 result = self.provider.generate_schedule(
                     redo_context, build_prompt(redo_context)
                 )
-            except ProviderError:
+                if not validate_schedule(result.items, redo_context, strict_availability=True).is_valid:
+                    result = None
+            except (ProviderError, ValueError, TypeError, AttributeError):
                 result = None
         if result is None:
             provider_used = "heuristic_fallback"
@@ -743,6 +861,8 @@ class SchedulingService:
                 result = self.heuristic.generate_schedule(
                     redo_context, build_prompt(redo_context)
                 )
+                if not validate_schedule(result.items, redo_context, strict_availability=True).is_valid:
+                    result = None
             except Exception as exc:  # pragma: no cover - defensive
                 result = None
 
@@ -790,14 +910,20 @@ class SchedulingService:
                     reason=entry.get("reason", ""),
                 )
                 for entry in replaced
+                if not entry.get("accepted")
             ],
             reasoning=result.reasoning,
         )
-        validation = validate_schedule(full_result.items, full_context)
+        validation = validate_schedule(full_result.items, full_context, strict_availability=True)
+        if not validation.is_valid:
+            self.db.commit()
+            self.db.refresh(recommendation)
+            return recommendation
         meta = self._build_meta(full_context, full_result, validation, provider_used)
 
         stored["items"] = replaced
         stored["meta"] = meta
+        recommendation.recommendation = stored
         recommendation.reasoning = result.reasoning or recommendation.reasoning
         self.db.commit()
         self.db.refresh(recommendation)

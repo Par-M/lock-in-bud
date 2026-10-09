@@ -26,7 +26,7 @@ enum AuthEndpoint: Endpoint {
     case dev(name: String, email: String)
     case refresh(refreshToken: String)
     case me
-    case logout
+    case logout(refreshToken: String)
 
     var path: String {
         switch self {
@@ -60,7 +60,9 @@ enum AuthEndpoint: Endpoint {
             return DevLoginRequest(name: name, email: email)
         case .refresh(let refreshToken):
             return RefreshRequest(refreshToken: refreshToken)
-        case .me, .logout:
+        case .logout(let refreshToken):
+            return RefreshRequest(refreshToken: refreshToken)
+        case .me:
             return nil
         }
     }

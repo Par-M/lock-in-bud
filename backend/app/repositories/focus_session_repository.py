@@ -23,6 +23,7 @@ def create_focus_session(
             int((data.ended_at - data.started_at).total_seconds()),
         )
     session = FocusSession(
+        id=data.session_id or uuid.uuid4(),
         user_id=user_id,
         task_id=data.task_id,
         started_at=data.started_at,

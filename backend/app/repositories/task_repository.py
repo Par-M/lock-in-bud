@@ -146,6 +146,8 @@ def list_tasks(
 
 def update_task(db: Session, task: Task, data: TaskUpdate) -> Task:
     for field, value in data.model_dump(exclude_unset=True).items():
+        if field == "repeat_overrides" and value is not None:
+            value = data.model_dump(mode="json", exclude_unset=True)[field]
         setattr(task, field, value)
     db.flush()
     db.refresh(task)

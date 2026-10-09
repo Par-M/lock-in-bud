@@ -75,9 +75,6 @@ struct FocusDashboardView: View {
                     statsButton
                     ChatButton()
 
-                    if let summary = focus.summary, let analysis = summary.analysis, !analysis.isEmpty {
-                        analysisCard(analysis)
-                    }
                 }
                 .padding()
             }
@@ -199,9 +196,8 @@ struct FocusDashboardView: View {
 
     private func startTimer() {
         FocusTimerStarter.startFocus()
-        timerStartedAtRef = Date().timeIntervalSince1970
-        elapsedSeconds = 0
-        startTicker()
+        timerStartedAtRef = FocusTimerStarter.startedAt
+        resumeTickerIfRunning()
     }
 
     private func stopTimer() {
@@ -245,10 +241,6 @@ struct FocusDashboardView: View {
             durationSeconds: seconds,
             category: resolvedCategory
         )
-        if let activeTaskID, seconds >= 60 {
-            let minutes = seconds / 60
-            try? await taskService.recordTime(id: activeTaskID, minutes: minutes)
-        }
         await rescheduleNotifications()
     }
 
@@ -288,18 +280,6 @@ struct FocusDashboardView: View {
         .accessibilityIdentifier("viewFocusStatsButton")
     }
 
-    private func analysisCard(_ analysis: String) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Label("Focus insight", systemImage: "sparkles")
-                .font(.headline)
-            Text(analysis)
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding()
-        .background(Color.indigo.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
-    }
 }
 
 struct SessionStop: Identifiable {

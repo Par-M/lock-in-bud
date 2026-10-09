@@ -14,11 +14,20 @@ final class FocusService {
 
     private let client: APIClient
     private let pendingStore: PendingFocusSessionStore
+    private var pendingUserID: UUID?
+    private var isFlushing = false
 
     init(client: APIClient? = nil, pendingStore: PendingFocusSessionStore? = nil) {
         self.client = client ?? APIClient()
         self.pendingStore = pendingStore ?? PendingFocusSessionStore()
-        self.pendingSessions = self.pendingStore.load()
+        refreshPendingAccount()
+    }
+
+    private func refreshPendingAccount() {
+        let userID = client.userID
+        guard userID != pendingUserID else { return }
+        pendingUserID = userID
+        pendingSessions = userID.map { pendingStore.load(userID: $0) } ?? []
     }
 
     func loadFocus(after: Date? = nil, before: Date? = nil) async {
@@ -37,7 +46,14 @@ final class FocusService {
         durationSeconds: Int? = nil,
         category: String? = nil
     ) async -> FocusSession? {
-        let payload = FocusSessionCreate(
+        refreshPendingAccount()
+        guard let userID = client.userID else {
+            errorMessage = "Sign in before logging a focus session."
+            return nil
+        }
+        errorMessage = nil
+        let operation = PendingFocusSession(
+            id: UUID(),
             taskID: taskID,
             startedAt: startedAt,
             endedAt: endedAt,
@@ -45,23 +61,18 @@ final class FocusService {
             category: category
         )
         do {
-            let session: FocusSession = try await client.request(FocusEndpoint.create(payload))
+            let session: FocusSession = try await client.request(FocusEndpoint.create(operation.createPayload))
+            guard client.userID == userID else { return nil }
             dataVersion += 1
             await loadFocus()
             return session
         } catch {
-            // Keep the session safe locally so a stalled upload never loses the
-            // work. It is replayed by flushPendingSessions() once the device is
-            // back online (foreground or after a successful refresh).
-            enqueuePending(
-                PendingFocusSession(
-                    taskID: taskID,
-                    startedAt: startedAt,
-                    endedAt: endedAt,
-                    durationSeconds: durationSeconds,
-                    category: category
-                )
-            )
+            guard Self.shouldQueue(error) else {
+                errorMessage = error.localizedDescription
+                return nil
+            }
+            // Reuse the first POST's ID if its outcome was ambiguous.
+            enqueuePending(operation, userID: userID)
             errorMessage = "Focus session saved on this device. It will sync when you're back online."
             return nil
         }
@@ -73,44 +84,83 @@ final class FocusService {
     /// token refresh so sessions recorded while offline or while the session
     /// had lapsed are not silently dropped.
     func flushPendingSessions() async {
+        guard !isFlushing else { return }
+        refreshPendingAccount()
+        guard let userID = pendingUserID else { return }
         let pending = pendingSessions
         guard !pending.isEmpty else { return }
+        isFlushing = true
+        defer { isFlushing = false }
 
-        var remaining = pending
-        var flushed: [PendingFocusSession] = []
+        var didChange = false
+        var rejectedError: String?
         for queued in pending {
+            guard client.userID == userID else { refreshPendingAccount(); return }
             do {
-                let payload = FocusSessionCreate(
-                    taskID: queued.taskID,
-                    startedAt: queued.startedAt,
-                    endedAt: queued.endedAt,
-                    durationSeconds: queued.durationSeconds,
-                    category: queued.category
-                )
-                _ = try await client.request(FocusEndpoint.create(payload)) as FocusSession
-                flushed.append(queued)
-                remaining.removeAll { $0.id == queued.id }
+                _ = try await client.request(FocusEndpoint.create(queued.createPayload)) as FocusSession
+                guard client.userID == userID else { refreshPendingAccount(); return }
+                didChange = true
+                pendingSessions.removeAll { $0.id == queued.id }
+                pendingStore.save(pendingSessions, userID: userID)
             } catch {
-                // Keep it queued; the next foreground will retry.
+                guard client.userID == userID else { refreshPendingAccount(); return }
+                if !Self.shouldQueue(error) {
+                    pendingSessions.removeAll { $0.id == queued.id }
+                    pendingStore.save(pendingSessions, userID: userID)
+                    didChange = true
+                    rejectedError = "A focus session could not sync: \(error.localizedDescription)"
+                }
             }
         }
 
-        guard !flushed.isEmpty else { return }
-        pendingSessions = remaining
-        pendingStore.save(remaining)
-        dataVersion += 1
-        await loadFocus()
-        if !pendingSessions.isEmpty {
-            errorMessage = "Some focus sessions are waiting to sync."
-        } else {
+        guard client.userID == userID else { refreshPendingAccount(); return }
+        if didChange {
             errorMessage = nil
+            dataVersion += 1
+            await loadFocus()
+        }
+        if let rejectedError {
+            errorMessage = rejectedError
+        } else if !pendingSessions.isEmpty {
+            errorMessage = "Some focus sessions are waiting to sync."
         }
     }
 
-    private func enqueuePending(_ session: PendingFocusSession) {
+    static func shouldQueue(_ error: Error) -> Bool {
+        if let error = error as? NetworkError {
+            switch error {
+            case .httpStatus(let status), .serverError(let status, _):
+                return [408, 425, 429].contains(status) || (500..<600).contains(status)
+            case .invalidResponse, .decoding:
+                // A POST may have committed even if its response was unusable.
+                return true
+            case .unauthorized:
+                return false
+            }
+        }
+        if let error = error as? URLError {
+            switch error.code {
+            case .timedOut, .networkConnectionLost, .notConnectedToInternet,
+                 .cannotConnectToHost, .cannotFindHost, .dnsLookupFailed, .cancelled:
+                return true
+            default:
+                return false
+            }
+        }
+        return false
+    }
+
+    private func enqueuePending(_ session: PendingFocusSession, userID: UUID) {
+        guard client.userID == userID else {
+            var saved = pendingStore.load(userID: userID)
+            saved.append(session)
+            pendingStore.save(saved, userID: userID)
+            refreshPendingAccount()
+            return
+        }
         guard !pendingSessions.contains(where: { $0.id == session.id }) else { return }
         pendingSessions.append(session)
-        pendingStore.save(pendingSessions)
+        pendingStore.save(pendingSessions, userID: userID)
     }
 
     @discardableResult
@@ -161,7 +211,9 @@ final class FocusService {
 
     private func loadSessions(after: Date? = nil, before: Date? = nil) async {
         do {
-            let response: [FocusSession] = try await client.request(FocusEndpoint.sessions)
+            let response: [FocusSession] = try await client.request(
+                FocusEndpoint.sessions(after: after, before: before)
+            )
             dailySessions = response
             dataVersion += 1
         } catch {
@@ -190,6 +242,14 @@ struct PendingFocusSession: Codable, Identifiable, Sendable {
     let endedAt: Date
     let durationSeconds: Int?
     let category: String?
+
+    var createPayload: FocusSessionCreate {
+        FocusSessionCreate(
+            sessionID: id, recordTaskTime: true, taskID: taskID,
+            startedAt: startedAt, endedAt: endedAt,
+            durationSeconds: durationSeconds, category: category
+        )
+    }
 
     init(
         id: UUID = UUID(),
@@ -220,16 +280,23 @@ final class PendingFocusSessionStore {
         self.fileURL = fileURL ?? directory.appendingPathComponent("PendingFocusSessions.json")
     }
 
-    func load() -> [PendingFocusSession] {
-        guard let data = try? Data(contentsOf: fileURL),
+    private func scopedURL(userID: UUID) -> URL {
+        fileURL.deletingLastPathComponent().appendingPathComponent(
+            "\(fileURL.deletingPathExtension().lastPathComponent)-\(userID.uuidString).json"
+        )
+    }
+
+    func load(userID: UUID) -> [PendingFocusSession] {
+        // Legacy unscoped files cannot be attributed safely and are never replayed.
+        guard let data = try? Data(contentsOf: scopedURL(userID: userID)),
               let sessions = try? JSONDecoder().decode([PendingFocusSession].self, from: data) else {
             return []
         }
         return sessions
     }
 
-    func save(_ sessions: [PendingFocusSession]) {
+    func save(_ sessions: [PendingFocusSession], userID: UUID) {
         guard let data = try? JSONEncoder().encode(sessions) else { return }
-        try? data.write(to: fileURL, options: .atomic)
+        try? data.write(to: scopedURL(userID: userID), options: .atomic)
     }
 }

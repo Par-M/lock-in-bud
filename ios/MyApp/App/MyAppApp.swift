@@ -67,6 +67,7 @@ struct MyAppApp: App {
                 .environment(habitService)
                 .environment(focusService)
                 .environment(chatService)
+                .onChange(of: authService.user?.id) { _, _ in chatService.synchronizeAccount() }
                 .preferredColorScheme(appearance.theme.colorScheme)
                 .task {
                     await authService.restoreSession()

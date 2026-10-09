@@ -7,6 +7,21 @@ enum FocusTimerStarter {
     static let activeTaskIDKey = "focusActiveTaskID"
     static let activeTaskTitleKey = "focusActiveTaskTitle"
     static let activeCategoryKey = "focusActiveCategory"
+    static let ownerKey = "focusTimerUserID"
+
+    static func synchronizeAccount(_ userID: UUID?) {
+        let owner = userID?.uuidString
+        let defaults = UserDefaults.standard
+        guard defaults.string(forKey: ownerKey) != owner || (userID == nil && startedAt > 0) else { return }
+        defaults.removeObject(forKey: startedAtKey)
+        clearActiveTask()
+        defaults.set(owner, forKey: ownerKey)
+        WidgetDataStore.writeFocus(startedAt: 0)
+        WidgetCenter.shared.reloadTimelines(ofKind: "FocusTimerWidget")
+        if #available(iOS 16.1, *) {
+            Task { await FocusLiveActivityManager.endLiveActivity(elapsedSeconds: 0) }
+        }
+    }
 
     static var activeTaskID: UUID? {
         guard let raw = UserDefaults.standard.string(forKey: activeTaskIDKey),
@@ -33,8 +48,12 @@ enum FocusTimerStarter {
     static func startFocus(
         taskID: UUID? = nil,
         title: String? = nil,
-        category: String? = nil
+        category: String? = nil,
+        keychain: KeychainManaging? = nil
     ) {
+        guard let userID = (keychain ?? KeychainManager()).loadSession()?.user.id else { return }
+        synchronizeAccount(userID)
+        guard self.startedAt <= 0 else { return }
         let defaults = UserDefaults.standard
         let startedAt = Date().timeIntervalSince1970
 

@@ -14,6 +14,47 @@ struct CalendarEventItem: Identifiable, Hashable, Sendable {
     let start: Date
     let end: Date
     let isAllDay: Bool
+    var occurrenceDate: Date? = nil
+
+    static func repeatingEvents(for task: TaskItem, on day: Date) -> [CalendarEventItem] {
+        let calendar = Calendar.current
+        guard let start = task.startAt, let end = task.endAt else { return [] }
+        let dayStart = calendar.startOfDay(for: day)
+        let dayEnd = calendar.date(byAdding: .day, value: 1, to: dayStart) ?? dayStart
+        let previousDay = calendar.date(byAdding: .day, value: -1, to: dayStart) ?? dayStart
+        var candidates = [OccurrenceDateKey.key(for: previousDay): previousDay,
+                          OccurrenceDateKey.key(for: dayStart): dayStart]
+        // Overrides may move an occurrence from any original date into this day.
+        for (key, override) in task.repeatOverrides ?? [:] where override.startAt != nil || override.endAt != nil {
+            if let date = OccurrenceDateKey.date(for: key) { candidates[key] = date }
+        }
+        return candidates.compactMap { key, occurrenceDay in
+            let weekday = (calendar.component(.weekday, from: occurrenceDay) - 1 + 7) % 7
+            guard (task.repeatWeekdays ?? []).contains(weekday),
+                  occurrenceDay >= calendar.startOfDay(for: start),
+                  task.repeatEndsOn.map({ occurrenceDay <= calendar.startOfDay(for: $0) }) ?? true else { return nil }
+            let interval = occurrenceInterval(start: start, end: end, on: occurrenceDay)
+            let override = task.repeatOverrides?[key]
+            let actualStart = override?.startAt ?? interval.start
+            let actualEnd = override?.endAt ?? interval.end
+            guard actualStart < dayEnd, actualEnd > dayStart else { return nil }
+            return CalendarEventItem(
+                id: "app-task-\(task.id.uuidString)-\(Int(occurrenceDay.timeIntervalSince1970))",
+                title: task.title, start: actualStart, end: actualEnd,
+                isAllDay: false, occurrenceDate: occurrenceDay
+            )
+        }.sorted { $0.start < $1.start }
+    }
+
+    static func occurrenceInterval(start: Date, end: Date, on day: Date, calendar: Calendar = .current) -> (start: Date, end: Date) {
+        let startTime = calendar.dateComponents([.hour, .minute, .second], from: start)
+        let endTime = calendar.dateComponents([.hour, .minute, .second], from: end)
+        let dayOffset = calendar.dateComponents([.day], from: calendar.startOfDay(for: start), to: calendar.startOfDay(for: end)).day ?? 0
+        let endDay = calendar.date(byAdding: .day, value: dayOffset, to: day) ?? day
+        let occurrenceStart = calendar.date(bySettingHour: startTime.hour ?? 0, minute: startTime.minute ?? 0, second: startTime.second ?? 0, of: day) ?? day
+        let occurrenceEnd = calendar.date(bySettingHour: endTime.hour ?? 0, minute: endTime.minute ?? 0, second: endTime.second ?? 0, of: endDay) ?? occurrenceStart
+        return (occurrenceStart, occurrenceEnd)
+    }
 }
 
 @MainActor

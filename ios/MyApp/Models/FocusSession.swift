@@ -21,6 +21,8 @@ struct FocusSession: Codable, Identifiable, Hashable, Sendable {
 }
 
 struct FocusSessionCreate: Encodable, Sendable {
+    let sessionID: UUID
+    let recordTaskTime: Bool
     let taskID: UUID?
     let startedAt: Date
     let endedAt: Date
@@ -28,12 +30,16 @@ struct FocusSessionCreate: Encodable, Sendable {
     let category: String?
 
     init(
+        sessionID: UUID,
+        recordTaskTime: Bool = true,
         taskID: UUID?,
         startedAt: Date,
         endedAt: Date,
         durationSeconds: Int? = nil,
         category: String? = nil
     ) {
+        self.sessionID = sessionID
+        self.recordTaskTime = recordTaskTime
         self.taskID = taskID
         self.startedAt = startedAt
         self.endedAt = endedAt
@@ -42,6 +48,8 @@ struct FocusSessionCreate: Encodable, Sendable {
     }
 
     enum CodingKeys: String, CodingKey {
+        case sessionID = "session_id"
+        case recordTaskTime = "record_task_time"
         case taskID = "task_id"
         case startedAt = "started_at"
         case endedAt = "ended_at"

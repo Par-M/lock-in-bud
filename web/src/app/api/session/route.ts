@@ -20,7 +20,15 @@ export async function POST(request: NextRequest) {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ id_token }), cache: "no-store", signal: AbortSignal.timeout(20_000),
     });
-    if (!response.ok) return NextResponse.json({ detail: "Google sign-in failed. Please try again." }, { status: response.status });
+    if (!response.ok) {
+      if (response.status >= 500) {
+        return NextResponse.json({ detail: "The app's backend is unavailable. Sign-in cannot finish until the service is restored." }, { status: 502 });
+      }
+      if (response.status === 401) {
+        return NextResponse.json({ detail: "The server could not verify your Google sign-in. Try again; if it continues, check that the website's OAuth client ID is accepted by the backend." }, { status: 401 });
+      }
+      return NextResponse.json({ detail: "Sign-in could not finish. Please try again." }, { status: response.status });
+    }
     const tokens = await response.json();
     await saveTokens(tokens);
     return NextResponse.json(tokens.user);
