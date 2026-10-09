@@ -3,8 +3,17 @@ from datetime import date
 from datetime import datetime
 from datetime import timedelta
 from zoneinfo import ZoneInfo
+from unittest.mock import Mock
 
+import pytest
+
+from app.models.task import Task
+from app.models.ai_recommendation import AIRecommendation
+from app.models.calendar_block import CalendarBlock
+from app.models.task import TaskProductivity
 from app.models.task import TaskPriority
+from app.models.user_preference import UserPreference
+from app.schemas.schedule import ScheduleGenerateRequest
 from app.services.scheduling.context import ProposedBlock
 from app.services.scheduling.context import SchedulingContext
 from app.services.scheduling.context import TaskContext
@@ -13,9 +22,20 @@ from app.services.scheduling.free_slots import find_free_slots
 from app.services.scheduling.prompt_builder import build_prompt
 from app.services.scheduling.providers import HeuristicProvider
 from app.services.scheduling.validator import validate_schedule
+from app.services.scheduling_service import SchedulingService
 
 UTC = ZoneInfo("UTC")
 DATES = [date(2026, 8, 3), date(2026, 8, 4)]
+
+
+@pytest.fixture(autouse=True)
+def freeze_free_slot_clock(monkeypatch):
+    class FrozenDateTime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return datetime(2026, 8, 3, 8, tzinfo=UTC).astimezone(tz)
+
+    monkeypatch.setattr("app.services.scheduling.free_slots.datetime", FrozenDateTime)
 
 
 def utc(value: str) -> datetime:
@@ -40,6 +60,25 @@ def task(title="Task", priority=TaskPriority.medium, duration=60, deadline=None,
 
 
 class TestFindFreeSlots:
+    def test_hour_24_means_next_midnight(self):
+        result = find_free_slots(
+            dates=[DATES[0]], busy=[], start_hour=23, end_hour=24, timezone="UTC"
+        )
+        assert result == [slot("2026-08-03T23:00:00+00:00", "2026-08-04T00:00:00+00:00")]
+
+    def test_elapsed_work_windows_are_skipped(self):
+        result = find_free_slots(
+            dates=[date(2026, 8, 2), DATES[0]], busy=[],
+            start_hour=5, end_hour=8, timezone="UTC",
+        )
+        assert result == []
+
+    def test_current_window_is_clamped_to_now(self):
+        result = find_free_slots(
+            dates=[DATES[0]], busy=[], start_hour=5, end_hour=9, timezone="UTC"
+        )
+        assert result == [slot("2026-08-03T08:00:00+00:00", "2026-08-03T09:00:00+00:00")]
+
     def test_excludes_busy_events(self):
         busy = [slot("2026-08-03T10:00:00+00:00", "2026-08-03T11:00:00+00:00")]
         result = find_free_slots(
@@ -133,6 +172,78 @@ def build_context(tasks, busy=None, buffer=15, max_daily_hours=8):
 
 
 class TestValidator:
+    @pytest.mark.parametrize("retained,fixed,flexible,valid", [
+        (240, 0, 60, True), (240, 0, 120, False),
+        (240, 120, 0, True), (240, 120, 30, False),
+        (360, 0, 30, False),
+    ])
+    def test_strict_daily_cap_counts_retained_but_allows_fixed_excess(self, retained, fixed, flexible, valid):
+        tasks, blocks = [], []
+        if fixed:
+            start = utc("2026-08-03T12:00:00+00:00")
+            t = task("Fixed", duration=fixed, start_at=start, end_at=start + timedelta(minutes=fixed))
+            tasks.append(t)
+            blocks.append(ProposedBlock(t.id, t.title, t.start_at, t.end_at, "fixed"))
+        if flexible:
+            t = task("Flexible", duration=flexible)
+            tasks.append(t)
+            start = utc("2026-08-03T09:00:00+00:00")
+            blocks.append(ProposedBlock(t.id, t.title, start, start + timedelta(minutes=flexible), "flex"))
+        context = build_context(tasks, max_daily_hours=5)
+        context.committed_minutes_by_day = {DATES[0]: retained}
+        context.free_slots = [slot("2026-08-03T09:00:00+00:00", "2026-08-03T12:00:00+00:00")]
+        assert validate_schedule(blocks, context).is_valid
+        result = validate_schedule(blocks, context, strict_availability=True)
+        assert result.is_valid is valid
+        if not valid:
+            assert any("retained commitments" in error for error in result.errors)
+
+    def test_strict_mode_rejects_overlapping_flexible_output(self):
+        first, second = task("First"), task("Second")
+        context = build_context([first, second])
+        context.free_slots = [slot("2026-08-03T09:00:00+00:00", "2026-08-03T12:00:00+00:00")]
+        blocks = [ProposedBlock(
+            task_id=t.id, task_title=t.title, reason="x",
+            start=utc("2026-08-03T10:00:00+00:00"), end=utc("2026-08-03T11:00:00+00:00"),
+        ) for t in (first, second)]
+        assert validate_schedule(blocks, context).is_valid
+        result = validate_schedule(blocks, context, strict_availability=True)
+        assert not result.is_valid and any("overlaps" in error for error in result.errors)
+
+    def test_strict_availability_is_opt_in(self):
+        t = task()
+        context = build_context([t])
+        block = ProposedBlock(
+            task_id=t.id, task_title=t.title,
+            start=utc("2026-08-03T10:00:00+00:00"), end=utc("2026-08-03T11:00:00+00:00"), reason="x",
+        )
+        assert validate_schedule(block, context).is_valid
+        assert not validate_schedule(block, context, strict_availability=True).is_valid
+        context.free_slots = [slot("2026-08-03T09:00:00+00:00", "2026-08-03T12:00:00+00:00")]
+        assert validate_schedule(block, context, strict_availability=True).is_valid
+
+    def test_strict_mode_still_allows_explicit_fixed_overlap(self):
+        t = task(start_at=utc("2026-08-03T10:00:00+00:00"), end_at=utc("2026-08-03T11:00:00+00:00"))
+        context = build_context([t], busy=[slot("2026-08-03T09:00:00+00:00", "2026-08-03T12:00:00+00:00")])
+        block = ProposedBlock(task_id=t.id, task_title=t.title, start=t.start_at, end=t.end_at, reason="fixed")
+        result = validate_schedule(block, context, strict_availability=True)
+        assert result.is_valid and any("overlaps" in warning for warning in result.warnings)
+
+    def test_hour_24_work_window_is_valid(self):
+        t = task()
+        context = build_context([t])
+        context.work_end_hour = 24
+        result = validate_schedule(ProposedBlock(
+            task_id=t.id, task_title=t.title,
+            start=utc("2026-08-03T23:00:00+00:00"),
+            end=utc("2026-08-04T00:00:00+00:00"), reason="x",
+        ), context)
+        assert result.is_valid
+
+    def test_malformed_block_is_invalid(self):
+        context = build_context([task()])
+        assert not validate_schedule([{"start": "not a date"}], context).is_valid
+
     def test_valid_schedule_passes(self):
         t = task(priority=TaskPriority.high)
         context = build_context([t])
@@ -550,6 +661,21 @@ class TestValidator:
 
 
 class TestHeuristicProvider:
+    def test_retained_daily_budget_limits_new_work(self):
+        t = task("New", duration=180)
+        context = build_context([t], buffer=0, max_daily_hours=5)
+        context.committed_minutes_by_day = {DATES[0]: 240}
+        context.free_slots = [
+            slot("2026-08-03T09:00:00+00:00", "2026-08-03T12:00:00+00:00"),
+            slot("2026-08-04T09:00:00+00:00", "2026-08-04T17:00:00+00:00"),
+        ]
+        result = HeuristicProvider().generate_schedule(context, build_prompt(context))
+        today = sum(int((b.end - b.start).total_seconds() // 60) for b in result.items if b.start.date() == DATES[0])
+        assert today == 60
+        assert sum(int((b.end - b.start).total_seconds() // 60) for b in result.items) == 180
+        assert context.committed_minutes_by_day == {DATES[0]: 240}
+        assert validate_schedule(result.items, context, strict_availability=True).is_valid
+
     def test_schedules_by_priority(self):
         # Priority removed: now ordered by deadline (earlier deadline first)
         high = task("High", priority=TaskPriority.high, duration=60, deadline=utc("2026-08-03T12:00:00+00:00"))
@@ -846,6 +972,12 @@ class TestHeuristicProvider:
 
 
 class TestPrompt:
+    def test_shows_retained_capacity(self):
+        context = build_context([task()], max_daily_hours=5)
+        context.committed_minutes_by_day = {DATES[0]: 240}
+        prompt = build_prompt(context)
+        assert "2026-08-03: 240 min committed; 60 min remaining" in prompt
+
     def test_instructs_scheduling_before_deadline(self):
         t = task(deadline=datetime(2026, 8, 3, 10, 0, tzinfo=UTC))
         context = build_context([t])
@@ -858,3 +990,141 @@ class TestPrompt:
         prompt = build_prompt(context)
         assert "Daily max hours" in prompt
         assert "at most 4 hours of work" in prompt
+
+
+class TestRequestDates:
+    @pytest.mark.parametrize("value", [
+        "2026-08-03T01:00:00Z",
+        datetime(2026, 8, 3, 1, tzinfo=UTC),
+    ])
+    def test_aware_datetime_converted_to_request_timezone(self, value):
+        request = ScheduleGenerateRequest(
+            start_date=value, end_date=value, timezone="America/Los_Angeles"
+        )
+        assert request.start_date == request.end_date == date(2026, 8, 2)
+
+    def test_plain_dates_and_naive_datetimes_remain_local(self):
+        request = ScheduleGenerateRequest(
+            start_date="2026-08-03", end_date="2026-08-03T01:00:00",
+            timezone="America/Los_Angeles",
+        )
+        assert request.start_date == request.end_date == DATES[0]
+
+    def test_order_checked_after_timezone_conversion(self):
+        with pytest.raises(ValueError, match="end_date"):
+            ScheduleGenerateRequest(
+                start_date="2026-08-03", end_date="2026-08-03T01:00:00Z",
+                timezone="America/Los_Angeles",
+            )
+
+
+class TestServiceContext:
+    def test_retained_budget_merges_and_splits_at_local_midnight(self, monkeypatch):
+        monkeypatch.setattr(
+            "app.services.scheduling_service._utc_now",
+            lambda: utc("2026-08-03T15:00:00+00:00"),
+        )
+        fixed = Task(
+            id=uuid.uuid4(), start_at=utc("2026-08-03T06:00:00+00:00"),
+            end_at=utc("2026-08-03T10:00:00+00:00"),
+        )
+        block = CalendarBlock(
+            task_id=fixed.id, start_at=utc("2026-08-03T09:00:00+00:00"),
+            end_at=utc("2026-08-03T11:00:00+00:00"),
+        )
+        db = Mock()
+        db.scalars.side_effect = [
+            Mock(all=Mock(return_value=[fixed])), Mock(all=Mock(return_value=[])),
+            Mock(all=Mock(return_value=[block])),
+        ]
+        service = SchedulingService(db, uuid.uuid4(), provider=Mock())
+        t = Task(id=uuid.uuid4(), title="New", estimated_duration=180, priority=TaskPriority.medium)
+        preference = UserPreference(
+            work_hours_start=9, work_hours_end=17, default_duration_minutes=30,
+            buffer_minutes=15, energy_level=3, max_daily_hours=5,
+        )
+        context = service._build_context([t], preference, ScheduleGenerateRequest(
+            start_date="2026-08-03", end_date="2026-08-04", timezone="America/Los_Angeles",
+        ))
+        assert context.committed_minutes_by_day[DATES[0]] == 240
+        assert context.committed_minutes_by_day[DATES[1]] == 0
+
+    def test_recurring_windows_include_overnight_and_use_native_weekdays(self):
+        service = SchedulingService(Mock(), uuid.uuid4(), provider=Mock())
+        series = Task(
+            start_at=utc("2026-07-26T23:00:00+00:00"),
+            end_at=utc("2026-07-27T01:00:00+00:00"), repeat_weekdays=[0],
+            repeat_ends_on=utc("2026-08-02T23:59:00+00:00"),
+        )
+        windows = service._fixed_windows([series], DATES, UTC)
+        assert windows == [slot("2026-08-02T23:00:00+00:00", "2026-08-03T01:00:00+00:00")]
+
+    def test_auto_regenerate_restores_latest_valid_user_context(self):
+        db = Mock()
+        request = ScheduleGenerateRequest(
+            start_date="2026-08-03", end_date="2026-08-09", timezone="America/Los_Angeles",
+            busy_times=[{"start": "2026-08-03T10:00:00Z", "end": "2026-08-03T11:00:00Z"}],
+        )
+        db.scalars.return_value = [
+            AIRecommendation(recommendation={"request": ["malformed"]}),
+            AIRecommendation(recommendation={"request": {"timezone": "invalid", "busy_times": []}}),
+            AIRecommendation(recommendation={"request": request.model_dump(mode="json")}),
+        ]
+        service = SchedulingService(db, uuid.uuid4(), provider=Mock())
+        service.generate = Mock(return_value=AIRecommendation(reasoning="Ready"))
+        recommendation = service.auto_regenerate("fixed event added")
+        assert service.generate.call_args.args[0] == request
+        assert recommendation.reasoning == "[Auto] fixed event added: Ready"
+
+    @pytest.mark.parametrize("stored", [[], [AIRecommendation(recommendation={})], [
+        AIRecommendation(recommendation={"request": {"timezone": "UTC", "busy_times": "bad"}})
+    ]])
+    def test_auto_regenerate_without_valid_context_does_nothing(self, stored):
+        db = Mock()
+        db.scalars.return_value = stored
+        service = SchedulingService(db, uuid.uuid4(), provider=Mock())
+        service.generate = Mock()
+        assert service.auto_regenerate() is None
+        service.generate.assert_not_called()
+
+    @pytest.mark.parametrize("estimate,actual,productivity,expected", [
+        (120, 45, None, 75),
+        (None, 15, None, 30),
+        (120, 45, TaskProductivity.slow, 101),
+        (60, 60, TaskProductivity.slow, None),
+        (60, 90, None, None),
+    ])
+    def test_remaining_duration_and_preference_default(
+        self, monkeypatch, estimate, actual, productivity, expected
+    ):
+        monkeypatch.setattr(
+            "app.services.scheduling_service._utc_now",
+            lambda: datetime(2026, 8, 3, 8, tzinfo=UTC),
+        )
+        db = Mock()
+        db.scalars.return_value.all.return_value = []
+        service = SchedulingService(db, uuid.uuid4(), provider=Mock())
+        t = Task(
+            id=uuid.uuid4(), title="Remaining", estimated_duration=estimate,
+            actual_duration=actual, priority=TaskPriority.medium, productivity=productivity,
+        )
+        preference = UserPreference(
+            work_hours_start=9, work_hours_end=17, default_duration_minutes=45,
+            buffer_minutes=15, energy_level=3, max_daily_hours=8,
+        )
+        context = service._build_context([t], preference, ScheduleGenerateRequest(
+            start_date="2028-08-03", end_date="2028-08-04"
+        ))
+        assert context.dates[0] == DATES[0]
+        if expected is None:
+            assert context.tasks == []
+        else:
+            assert context.tasks[0].duration_minutes == expected
+
+    def test_lifecycle_lock_refreshes_existing_identity(self):
+        db = Mock()
+        service = SchedulingService(db, uuid.uuid4(), provider=Mock())
+        service.get_recommendation(uuid.uuid4(), lock=True)
+        statement = db.scalar.call_args.args[0]
+        assert "FOR UPDATE" in str(statement)
+        assert statement.get_execution_options()["populate_existing"] is True

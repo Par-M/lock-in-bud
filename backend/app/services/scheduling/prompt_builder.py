@@ -83,6 +83,14 @@ def build_prompt(context: SchedulingContext) -> str:
             f"| energy={task.energy_level}"
         )
     lines.append("")
+    if context.committed_minutes_by_day:
+        lines.append("Retained commitments already count toward the daily max hours:")
+        for day, minutes in sorted(context.committed_minutes_by_day.items()):
+            lines.append(
+                f"- {day.isoformat()}: {minutes} min committed; "
+                f"{max(0, context.max_daily_hours * 60 - minutes):g} min remaining for proposed work."
+            )
+        lines.append("")
     lines.append("Free time slots (UTC ISO times are given in the schedule):")
     if context.free_slots:
         for slot in context.free_slots:

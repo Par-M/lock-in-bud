@@ -54,9 +54,16 @@ final class SyncManager {
 
     private func uploadTasks() async throws {
         for local in store.dirtyTasks() {
+            guard client.userID == local.userId else {
+                throw NetworkError.serverError(status: 403, detail: "Saved task changes cannot be uploaded by a different account")
+            }
             if local.isDeleted {
                 if local.syncedAt != nil {
-                    _ = try? await client.request(TaskEndpoint.delete(local.id)) as MessageResponse
+                    do {
+                        _ = try await client.request(TaskEndpoint.delete(local.id)) as MessageResponse
+                    } catch NetworkError.httpStatus(404) {
+                        // Already absent on the server; the tombstone can be removed.
+                    }
                 }
                 store.purgeTask(id: local.id)
                 continue
@@ -74,6 +81,7 @@ final class SyncManager {
                     )
                     store.replaceTask(id: local.id, with: updated, syncedAt: Date())
                 } catch NetworkError.httpStatus(404) {
+                    guard client.userID == local.userId else { throw NetworkError.unauthorized }
                     let created: TaskItem = try await client.request(
                         TaskEndpoint.create(TaskCreateRequest(from: local))
                     )
@@ -85,9 +93,16 @@ final class SyncManager {
 
     private func uploadBlocks() async throws {
         for local in store.dirtyBlocks() {
+            guard client.userID == local.userId else {
+                throw NetworkError.serverError(status: 403, detail: "Saved schedule changes cannot be uploaded by a different account")
+            }
             if local.isDeleted {
                 if local.syncedAt != nil {
-                    _ = try? await client.request(CalendarEndpoint.deleteBlock(local.id)) as MessageResponse
+                    do {
+                        _ = try await client.request(CalendarEndpoint.deleteBlock(local.id)) as MessageResponse
+                    } catch NetworkError.httpStatus(404) {
+                        // Already absent on the server; the tombstone can be removed.
+                    }
                 }
                 store.purgeBlock(id: local.id)
                 continue
@@ -108,6 +123,7 @@ final class SyncManager {
                     )
                     store.replaceBlock(id: local.id, with: updated, syncedAt: Date())
                 } catch NetworkError.httpStatus(404) {
+                    guard client.userID == local.userId else { throw NetworkError.unauthorized }
                     let created: CalendarBlock = try await client.request(
                         CalendarEndpoint.createBlock(CalendarBlockCreateRequest(from: local))
                     )
@@ -122,6 +138,12 @@ final class SyncManager {
     private func downloadChanges() async throws {
         let since = store.lastSyncDate()
 
+        let activeResponse: TaskListResponse = try await client.request(
+            TaskEndpoint.list(
+                search: nil, priority: nil, status: nil, category: nil,
+                archived: false, sort: nil, order: "asc", since: since
+            )
+        )
         let taskResponse: TaskListResponse = try await client.request(
             TaskEndpoint.list(
                 search: nil,
@@ -134,7 +156,8 @@ final class SyncManager {
                 since: since
             )
         )
-        store.upsertServerTasks(taskResponse.items)
+        let tasks = activeResponse.items + taskResponse.items
+        store.upsertServerTasks(tasks)
 
         let blockResponse: CalendarBlockListResponse = try await client.request(
             CalendarEndpoint.listBlocks(since: since)
@@ -142,7 +165,7 @@ final class SyncManager {
         store.upsertServerBlocks(blockResponse.items)
 
         if since == nil, pendingCount == 0 {
-            mirrorServer(taskIds: taskResponse.items.map(\.id), blockIds: blockResponse.items.map(\.id))
+            mirrorServer(taskIds: tasks.map(\.id), blockIds: blockResponse.items.map(\.id))
         }
     }
 

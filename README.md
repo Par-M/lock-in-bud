@@ -154,7 +154,8 @@ PostgreSQL with SQLAlchemy 2.0 and Alembic for migrations. The deployed backend 
    | `DATABASE_URL` | PostgreSQL connection string (e.g. `postgresql+psycopg://user:pass@localhost:5432/myapp_db`); use a Neon connection string for hosted deployments |
    | `JWT_SECRET` | Secret used to sign access/refresh tokens |
    | `GEMINI_API_KEY` | Google Gemini key for AI schedule generation |
-   | `GOOGLE_CLIENT_ID` | OAuth client ID for Google sign-in |
+   | `GOOGLE_CLIENT_ID` | Native OAuth client ID for Google sign-in |
+   | `GOOGLE_WEB_CLIENT_ID` | Web OAuth client ID, matching the website's `NEXT_PUBLIC_GOOGLE_CLIENT_ID` |
    | `ENABLE_DEV_AUTH` | Set `true` to allow the dev-only sign-in endpoint |
    | `APNS_*` | Push notification credentials (key id, team id, bundle id, key path, environment) |
 

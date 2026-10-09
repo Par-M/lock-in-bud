@@ -49,6 +49,7 @@ class SchedulingContext:
     max_chunk_minutes: int = 90
     max_daily_hours: int = 8
     free_slots: list[TimeSlot] = field(default_factory=list)
+    committed_minutes_by_day: dict[date, int] = field(default_factory=dict)
 
     @property
     def scheduleable_minutes(self) -> int:

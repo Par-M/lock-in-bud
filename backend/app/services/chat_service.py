@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import json
-from typing import Any
+from datetime import datetime
 from uuid import UUID
+from zoneinfo import ZoneInfo
 
 import httpx
 
@@ -13,6 +14,7 @@ from app.services.task_service import TaskService
 from app.services.scheduling_service import SchedulingService
 from app.services.planner_service import PlannerService
 from app.services.focus_service import FocusService
+from app.services.habit_service import HabitService
 from sqlalchemy.orm import Session
 
 
@@ -36,7 +38,9 @@ If actions are needed, propose a short plan for the user rather than claiming to
 
 
 class ChatServiceError(Exception):
-    pass
+    def __init__(self, message: str, *, status_code: int = 400):
+        super().__init__(message)
+        self.status_code = status_code
 
 
 class ChatService:
@@ -51,6 +55,7 @@ class ChatService:
         schedule_service: SchedulingService | None = None,
         planner_service: PlannerService | None = None,
         focus_service: FocusService | None = None,
+        habit_service: HabitService | None = None,
     ) -> None:
         self.db = db
         self.user_id = user_id
@@ -58,9 +63,58 @@ class ChatService:
         self.schedule_service = schedule_service or SchedulingService(db, user_id)
         self.planner_service = planner_service or PlannerService(db, user_id=user_id)
         self.focus_service = focus_service or FocusService(db, user_id=user_id)
+        self.habit_service = habit_service or HabitService(db, user_id=user_id)
+
+    def _validate_timezone(self, value: str | None) -> str:
+        if not value:
+            return "UTC"
+        try:
+            ZoneInfo(value)
+            return value
+        except Exception:
+            return "UTC"
+
+    def _build_context_snapshot(self, timezone: str | None = None) -> str | None:
+        if not settings.chat_include_context:
+            return None
+        tz = self._validate_timezone(timezone)
+        try:
+            snapshot: dict[str, Any] = {
+                "generated_at": datetime.utcnow().isoformat() + "Z",
+                "timezone": tz,
+            }
+            try:
+                today = self.planner_service.today(tz)
+                snapshot["today"] = today.model_dump(mode="json") if hasattr(today, "model_dump") else today.dict()
+            except Exception:
+                pass
+            try:
+                overdue = self.task_service.list_overdue()
+                snapshot["overdue_count"] = len(overdue)
+            except Exception:
+                pass
+            try:
+                from datetime import timedelta
+                focus = self.focus_service.focus_summary(timedelta(days=1), tz)
+                snapshot["focus_summary"] = focus.model_dump(mode="json") if hasattr(focus, "model_dump") else focus.dict()
+            except Exception:
+                pass
+            try:
+                habits = self.habit_service.list_habits()
+                snapshot["habit_count"] = len(habits)
+            except Exception:
+                pass
+            text = json.dumps(snapshot, indent=2, default=str)
+            if len(text) > settings.chat_context_max_chars:
+                text = text[: settings.chat_context_max_chars] + "\n... (truncated)"
+            return text
+        except Exception:
+            return None
 
     def create_conversation(self, title: str | None = None):
         conv = chat_repository.create_conversation(self.db, user_id=self.user_id, title=title)
+        if not conv.title and title is None:
+            pass
         self.db.commit()
         self.db.refresh(conv)
         return conv
@@ -122,12 +176,26 @@ class ChatService:
             }
         ]
 
-    def send_message(self, conversation_id: UUID, content: str):
+    def send_message(self, conversation_id: UUID, content: str, timezone: str | None = None):
         conv = self.get_conversation(conversation_id)
+        if not settings.gemini_api_key.strip():
+            raise ChatServiceError(
+                "The assistant is not configured. Set GEMINI_API_KEY on the backend.",
+                status_code=503,
+            )
         user_msg = chat_repository.add_message(
             self.db, conversation_id=conv.id, role=ChatRole.user, content=content
         )
-        self.db.commit()
+        if not conv.title:
+            try:
+                trimmed = content.strip()
+                if len(trimmed) > 40:
+                    trimmed = trimmed[:37].rstrip() + "..."
+                conv.title = trimmed or None
+            except Exception:
+                pass
+
+        pass  # removed hardcoded shortcut
 
         history = chat_repository.list_messages(self.db, conversation_id=conv.id)
         context = []
@@ -165,26 +233,41 @@ class ChatService:
                     }
                 )
 
-        if not any(c.get("role") == "model" for c in context):
-            context.insert(0, {"role": "user", "parts": [{"text": SYSTEM_PROMPT}]})
+        system_parts = [{"text": SYSTEM_PROMPT}]
+        snapshot = self._build_context_snapshot(timezone)
+        system_parts = [{"text": SYSTEM_PROMPT}]
 
         payload = {
+            "systemInstruction": {"parts": system_parts},
             "contents": context,
             "generationConfig": {"temperature": 0.2},
             "tools": self._build_tools(),
+            "toolConfig": {"functionCallingConfig": {"mode": "NONE"}},
         }
 
         try:
             resp = httpx.post(
                 f"{self.BASE_URL}/models/{settings.gemini_chat_model}:generateContent",
-                params={"key": settings.gemini_api_key} if settings.gemini_api_key else {},
+                headers={"x-goog-api-key": settings.gemini_api_key},
                 json=payload,
                 timeout=45.0,
             )
             resp.raise_for_status()
             data = resp.json()
-        except Exception as e:
-            raise ChatServiceError(f"LLM request failed: {e}")
+        except httpx.HTTPStatusError as exc:
+            self.db.rollback()
+            code = exc.response.status_code
+            if code in (401, 403):
+                raise ChatServiceError(
+                    "Gemini rejected the backend API credentials. Check GEMINI_API_KEY and its API permissions.",
+                    status_code=503,
+                ) from exc
+            if code == 429:
+                raise ChatServiceError("The assistant's usage limit was reached. Try again later.", status_code=429) from exc
+            raise ChatServiceError("The assistant provider is unavailable. Please try again later.", status_code=502) from exc
+        except (httpx.RequestError, ValueError) as exc:
+            self.db.rollback()
+            raise ChatServiceError("Unable to reach the assistant. Please try again later.", status_code=502) from exc
 
         assistant_text = ""
         try:
@@ -194,8 +277,12 @@ class ChatService:
             for p in parts:
                 if "text" in p:
                     assistant_text += p["text"]
-        except Exception:
-            assistant_text = "I had trouble generating a response."
+        except (AttributeError, IndexError, TypeError):
+            assistant_text = ""
+
+        if not assistant_text.strip():
+            self.db.rollback()
+            raise ChatServiceError("The assistant returned no text. Please try again.", status_code=502)
 
         assistant_msg = chat_repository.add_message(
             self.db, conversation_id=conv.id, role=ChatRole.assistant, content=assistant_text

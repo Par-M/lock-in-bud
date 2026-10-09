@@ -3,6 +3,13 @@ from datetime import datetime
 from datetime import timezone
 
 import pytest
+from app.db.database import SessionLocal
+from app.models.ai_recommendation import AIRecommendation
+from app.models.task import Task
+from app.services.scheduling.context import ProposedBlock
+from app.services.scheduling.context import ProviderResult
+from app.core.config import settings
+from app.services.scheduling_service import SchedulingService
 
 
 def _parse(value: str) -> datetime:
@@ -16,6 +23,12 @@ def freeze_now(monkeypatch):
         "app.services.scheduling_service._utc_now",
         lambda: fixed,
     )
+    class FrozenDateTime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return fixed.astimezone(tz)
+
+    monkeypatch.setattr("app.services.scheduling.free_slots.datetime", FrozenDateTime)
     return fixed
 
 
@@ -54,6 +67,255 @@ def _generate(client, token, **overrides):
 
 
 class TestGenerateSchedule:
+    def test_new_fixed_proposal_counts_once_toward_daily_budget(self, client):
+        data = _login(client)
+        token = data["access_token"]
+        assert client.put("/api/v1/preferences", json={"max_daily_hours": 5}, headers=_auth(token)).status_code == 200
+        fixed = _create_task(client, token, title="New fixed event", estimated_duration=240,
+                             start_at="2026-08-03T12:00:00Z", end_at="2026-08-03T16:00:00Z")
+        flex = _create_task(client, token, title="Flexible", estimated_duration=180)
+        body = _generate(client, token).json()
+        assert body["failure_reason"] is None
+        today = [item for item in body["items"] if _parse(item["start"]).date().isoformat() == "2026-08-03"]
+        minutes = lambda item: (_parse(item["end"]) - _parse(item["start"])).total_seconds() / 60
+        assert sum(minutes(item) for item in today if item["task_id"] == fixed["id"]) == 240
+        assert sum(minutes(item) for item in today if item["task_id"] == flex["id"]) == 60
+
+    @pytest.mark.parametrize("retained_kind", ["calendar", "recurring", "fixed_duplicates"])
+    def test_retained_commitments_leave_only_remaining_daily_budget(self, client, retained_kind):
+        data = _login(client)
+        token = data["access_token"]
+        response = client.put("/api/v1/preferences", json={"max_daily_hours": 5}, headers=_auth(token))
+        assert response.status_code == 200
+        if retained_kind == "recurring":
+            retained = _create_task(
+                client, token, title="Class", estimated_duration=240,
+                start_at="2026-07-27T12:00:00Z", end_at="2026-07-27T16:00:00Z",
+                repeat_weekdays=list(range(7)),
+            )
+        else:
+            fixed = {} if retained_kind == "calendar" else {
+                "start_at": "2026-08-03T12:00:00Z", "end_at": "2026-08-03T16:00:00Z",
+            }
+            retained = _create_task(client, token, title="Retained", estimated_duration=240, **fixed)
+            created = client.post("/api/v1/calendar/blocks", json={
+                "task_id": retained["id"], "title": retained["title"],
+                "start_at": "2026-08-03T12:00:00Z", "end_at": "2026-08-03T16:00:00Z",
+            }, headers=_auth(token))
+            assert created.status_code == 201
+            if retained_kind == "fixed_duplicates":
+                _create_task(client, token, title="Overlapping retained event",
+                             start_at="2026-08-03T13:00:00Z", end_at="2026-08-03T15:00:00Z",
+                             estimated_duration=120)
+        new = _create_task(client, token, title="New work", estimated_duration=180)
+        response = _generate(client, token, task_ids=[new["id"]])
+        assert response.status_code == 200
+        body = response.json()
+        assert body["items"] and body["failure_reason"] is None
+        today_minutes = sum(
+            (_parse(item["end"]) - _parse(item["start"])).total_seconds() / 60
+            for item in body["items"] if _parse(item["start"]).date().isoformat() == "2026-08-03"
+        )
+        assert today_minutes == 60
+        assert sum((_parse(item["end"]) - _parse(item["start"])).total_seconds() / 60 for item in body["items"]) == 180
+        assert {item["task_id"] for item in body["items"]} == {new["id"]}
+
+    def test_blocks_being_moved_do_not_consume_retained_daily_budget(self, client):
+        data = _login(client)
+        token = data["access_token"]
+        assert client.put("/api/v1/preferences", json={"max_daily_hours": 3}, headers=_auth(token)).status_code == 200
+        moving = _create_task(client, token, estimated_duration=180)
+        assert client.post("/api/v1/calendar/blocks", json={
+            "task_id": moving["id"], "title": moving["title"],
+            "start_at": "2026-08-03T10:00:00Z", "end_at": "2026-08-03T12:00:00Z",
+        }, headers=_auth(token)).status_code == 201
+        body = _generate(client, token).json()
+        assert body["failure_reason"] is None
+        assert sum(
+            (_parse(item["end"]) - _parse(item["start"])).total_seconds() / 60
+            for item in body["items"] if _parse(item["start"]).date().isoformat() == "2026-08-03"
+        ) == 180
+
+    def test_ai_over_retained_daily_budget_falls_back(self, client, monkeypatch):
+        data = _login(client)
+        token = data["access_token"]
+        assert client.put("/api/v1/preferences", json={"max_daily_hours": 5}, headers=_auth(token)).status_code == 200
+        _create_task(client, token, title="Daily class", estimated_duration=240,
+                     start_at="2026-07-27T12:00:00Z", end_at="2026-07-27T16:00:00Z",
+                     repeat_weekdays=list(range(7)))
+        new = _create_task(client, token, title="New work", estimated_duration=180)
+        monkeypatch.setattr(settings, "gemini_api_key", "test-key")
+
+        class OverBudgetProvider:
+            def generate_schedule(self, context, prompt):
+                assert context.committed_minutes_by_day[_parse("2026-08-03T00:00:00Z").date()] == 240
+                return ProviderResult(items=[ProposedBlock(
+                    task_id=uuid.UUID(new["id"]), task_title=new["title"], reason="over budget",
+                    start=_parse("2026-08-03T09:05:00Z"), end=_parse("2026-08-03T11:05:00Z"),
+                )])
+
+        monkeypatch.setattr("app.services.scheduling_service.default_provider", OverBudgetProvider)
+        body = _generate(client, token).json()
+        assert body["meta"]["provider"] == "heuristic_fallback"
+        assert body["failure_reason"] is None
+        assert sum(
+            (_parse(item["end"]) - _parse(item["start"])).total_seconds() / 60
+            for item in body["items"] if _parse(item["start"]).date().isoformat() == "2026-08-03"
+        ) == 60
+
+    @pytest.mark.parametrize("collision", ["busy", "commitment", "horizon"])
+    def test_unavailable_ai_output_falls_back(self, client, monkeypatch, collision):
+        data = _login(client)
+        token = data["access_token"]
+        t = _create_task(client, token)
+        busy = [{"start": "2026-08-03T10:00:00Z", "end": "2026-08-03T11:00:00Z"}]
+        if collision == "commitment":
+            fixed = _create_task(client, token, title="Committed", start_at=busy[0]["start"], end_at=busy[0]["end"])
+            response = client.post("/api/v1/calendar/blocks", json={
+                "task_id": fixed["id"], "title": "Committed",
+                "start_at": busy[0]["start"], "end_at": busy[0]["end"],
+            }, headers=_auth(token))
+            assert response.status_code == 201
+        monkeypatch.setattr(settings, "gemini_api_key", "test-key")
+
+        class UnavailableProvider:
+            def generate_schedule(self, context, prompt):
+                day = "2026-08-20" if collision == "horizon" else "2026-08-03"
+                return ProviderResult(items=[ProposedBlock(
+                    task_id=uuid.UUID(t["id"]), task_title=t["title"],
+                    start=_parse(f"{day}T10:00:00Z"), end=_parse(f"{day}T11:00:00Z"), reason="invalid",
+                )])
+
+        monkeypatch.setattr("app.services.scheduling_service.default_provider", UnavailableProvider)
+        response = _generate(client, token, task_ids=[t["id"]], busy_times=busy if collision == "busy" else [])
+        assert response.status_code == 200
+        body = response.json()
+        assert body["meta"]["provider"] == "heuristic_fallback"
+        assert body["items"] and not body["failure_reason"]
+        for item in body["items"]:
+            start, end = _parse(item["start"]), _parse(item["end"])
+            assert start.date().isoformat() <= "2026-08-10"
+            if collision != "horizon":
+                assert not (start < _parse(busy[0]["end"]) and end > _parse(busy[0]["start"]))
+
+    def test_recurring_fixed_events_reserve_occurrences_not_proposals(self, client):
+        data = _login(client)
+        token = data["access_token"]
+        recurring = _create_task(
+            client, token, title="Daily class", start_at="2026-07-27T09:00:00Z",
+            end_at="2026-07-27T10:00:00Z", repeat_weekdays=list(range(7)),
+            repeat_ends_on="2026-08-04T23:59:00Z",
+        )
+        with SessionLocal() as db:
+            series = db.get(Task, uuid.UUID(recurring["id"]))
+            series.repeat_overrides = {
+                "2026-07-28": {"start_at": "2026-08-03T10:00:00Z", "end_at": "2026-08-03T11:00:00Z"},
+                "2026-08-03": {"start_at": "2026-08-03T11:00:00Z", "end_at": "2026-08-03T12:00:00Z"},
+            }
+            db.commit()
+        flex = _create_task(client, token, title="Study", estimated_duration=60)
+        response = _generate(client, token, task_ids=[flex["id"]])
+        assert response.status_code == 200
+        body = response.json()
+        assert body["items"] and {item["task_id"] for item in body["items"]} == {flex["id"]}
+        windows = [
+            ("2026-08-03T10:00:00Z", "2026-08-03T12:00:00Z"),
+            ("2026-08-04T09:00:00Z", "2026-08-04T10:00:00Z"),
+        ]
+        for entry in body["items"] + body["meta"]["free_slots"]:
+            start, end = _parse(entry["start"]), _parse(entry["end"])
+            assert all(not (start < _parse(b) and end > _parse(a)) for a, b in windows)
+        full = _generate(client, token).json()
+        assert recurring["id"] not in {item["task_id"] for item in full["items"]}
+        assert any(
+            _parse(slot["start"]) <= _parse("2026-08-05T09:00:00Z") < _parse(slot["end"])
+            for slot in full["meta"]["free_slots"]
+        )
+
+    def test_malformed_provider_falls_back_to_valid_schedule(self, client, monkeypatch):
+        data = _login(client)
+        _create_task(client, data["access_token"])
+        monkeypatch.setattr(settings, "gemini_api_key", "test-key")
+
+        class MalformedProvider:
+            def generate_schedule(self, context, prompt):
+                return ProviderResult(items=[{"start": "bad"}], reasoning="invalid")
+
+        monkeypatch.setattr(
+            "app.services.scheduling_service.default_provider", MalformedProvider
+        )
+        response = _generate(client, data["access_token"])
+        assert response.status_code == 200
+        body = response.json()
+        assert body["items"]
+        assert body["failure_reason"] is None
+        assert body["meta"]["provider"] == "heuristic_fallback"
+
+    @pytest.mark.parametrize("malformed", [False, True])
+    def test_invalid_fallback_is_not_stored_as_actionable(self, client, monkeypatch, malformed):
+        data = _login(client)
+        _create_task(client, data["access_token"])
+        healthy = _create_task(client, data["access_token"], title="Existing schedule")
+        existing = client.post("/api/v1/calendar/blocks", json={
+            "task_id": healthy["id"], "title": healthy["title"],
+            "start_at": "2026-08-04T10:00:00Z", "end_at": "2026-08-04T11:00:00Z",
+        }, headers=_auth(data["access_token"]))
+        assert existing.status_code == 201
+        monkeypatch.setattr(settings, "gemini_api_key", "")
+
+        def invalid_result(self, context, prompt):
+            t = context.tasks[0]
+            item = {"start": "bad"} if malformed else ProposedBlock(
+                task_id=t.id, task_title=t.title,
+                start=_parse("2026-08-03T10:00:00Z"),
+                end=_parse("2026-08-03T09:00:00Z"), reason="invalid",
+            )
+            return ProviderResult(items=[item], reasoning="invalid")
+
+        monkeypatch.setattr(
+            "app.services.scheduling_service.HeuristicProvider.generate_schedule",
+            invalid_result,
+        )
+        response = _generate(client, data["access_token"])
+        assert response.status_code == 200
+        body = response.json()
+        assert body["items"] == []
+        assert body["failure_reason"]
+        assert body["meta"]["provider"] == "failed"
+        assert "Try generating again" in body["reasoning"]
+        assert "Try generating again" in body["message"]
+        assert "automatically" not in body["reasoning"] + body["message"]
+        assert body["retry_at"] is not None
+        blocks = client.get("/api/v1/calendar/blocks", headers=_auth(data["access_token"])).json()
+        assert [block["id"] for block in blocks["items"]] == [existing.json()["id"]]
+        accepted = client.post(
+            f"/api/v1/schedule/recommendations/{body['id']}/accept",
+            headers=_auth(data["access_token"]),
+        )
+        assert accepted.status_code == 409
+
+    def test_replan_passes_notification_dependency(self, client, monkeypatch):
+        data = _login(client)
+        _create_task(client, data["access_token"])
+        original = SchedulingService._build_meta
+        notifications = []
+
+        def overcommitted(self, *args):
+            meta = original(self, *args)
+            meta["overcommitted"] = True
+            return meta
+
+        monkeypatch.setattr(SchedulingService, "_build_meta", overcommitted)
+        monkeypatch.setattr(
+            "app.services.notification_service.NotificationService.notify_overcommitted",
+            lambda self, user_id, **kwargs: notifications.append(user_id),
+        )
+        response = client.post("/api/v1/schedule/replan", json={
+            "start_date": "2026-08-03", "end_date": "2026-08-09",
+        }, headers=_auth(data["access_token"]))
+        assert response.status_code == 200
+        assert len(notifications) == 1
+
     def test_requires_authentication(self, client):
         response = _generate(client, "invalid")
         assert response.status_code == 401
@@ -331,6 +593,66 @@ class TestAcceptRecommendation:
 
 
 class TestItemLevelActions:
+    def test_redo_rejects_ai_slot_that_is_no_longer_available(self, client, monkeypatch):
+        data = _login(client)
+        proposal = self._proposal(client, data["access_token"])
+        original = proposal["items"][1]
+        monkeypatch.setattr(settings, "gemini_api_key", "test-key")
+
+        class UnavailableProvider:
+            def generate_schedule(self, context, prompt):
+                return ProviderResult(items=[ProposedBlock(
+                    task_id=uuid.UUID(original["task_id"]), task_title=original["task_title"],
+                    start=_parse(original["start"]), end=_parse(original["end"]), reason="unchanged",
+                )])
+
+        monkeypatch.setattr("app.services.scheduling_service.default_provider", UnavailableProvider)
+        response = client.post(
+            f"/api/v1/schedule/recommendations/{proposal['id']}/items/1/redo",
+            headers=_auth(data["access_token"]),
+        )
+        assert response.status_code == 200
+        body = response.json()
+        assert body["meta"]["provider"] == "heuristic_fallback"
+        assert _parse(body["items"][1]["start"]) != _parse(original["start"])
+
+    @pytest.mark.parametrize("accept_all", [False, True])
+    @pytest.mark.parametrize("legacy", [False, True])
+    def test_split_task_acceptance_retains_approved_chunks(self, client, accept_all, legacy):
+        data = _login(client)
+        token = data["access_token"]
+        task = _create_task(client, token, estimated_duration=180)
+        original = client.post("/api/v1/calendar/blocks", json={
+            "task_id": task["id"], "title": "Old partial plan",
+            "start_at": "2026-08-03T10:00:00Z", "end_at": "2026-08-03T11:00:00Z",
+        }, headers=_auth(token))
+        assert original.status_code == 201
+        proposal = _generate(client, token).json()
+        assert len(proposal["items"]) == 2
+        base = f"/api/v1/schedule/recommendations/{proposal['id']}"
+        first = client.post(f"{base}/items/0/accept", headers=_auth(token))
+        assert first.status_code == 200
+        approved_id = first.json()["blocks"][0]["id"]
+        with SessionLocal() as db:
+            rec = db.get(AIRecommendation, uuid.UUID(proposal["id"]))
+            stored = dict(rec.recommendation)
+            items = [dict(item) for item in stored["items"]]
+            assert items[0]["block_id"] == approved_id
+            if legacy:
+                items[0].pop("block_id")
+                stored["items"] = items
+                rec.recommendation = stored
+                db.commit()
+        suffix = "/accept" if accept_all else "/items/1/accept"
+        second = client.post(base + suffix, headers=_auth(token))
+        assert second.status_code == 200
+        assert second.json()["recommendation"]["status"] == "accepted"
+        listed = client.get("/api/v1/calendar/blocks", headers=_auth(token)).json()
+        assert listed["total"] == 2
+        assert approved_id in {block["id"] for block in listed["items"]}
+        assert original.json()["id"] not in {block["id"] for block in listed["items"]}
+        assert {block["task_id"] for block in listed["items"]} == {task["id"]}
+
     def _proposal(self, client, token):
         _create_task(client, token, title="Deep work")
         _create_task(client, token, title="Standup")
@@ -451,11 +773,44 @@ class TestItemLevelActions:
 
         redo_block = body["items"][1]
         kept_block = body["items"][0]
+        assert redo_block["start"] != items[1]["start"]
+        with SessionLocal() as db:
+            rec = db.get(AIRecommendation, uuid.UUID(proposal["id"]))
+            assert _parse(rec.recommendation["items"][1]["start"]) == _parse(redo_block["start"])
         assert _parse(redo_block["end"]) > _parse(redo_block["start"])
         assert not (
             _parse(redo_block["start"]) < _parse(kept_block["end"])
             and _parse(redo_block["end"]) > _parse(kept_block["start"])
         )
+
+    @pytest.mark.parametrize("malformed", [False, True])
+    def test_invalid_redo_preserves_stored_items(self, client, monkeypatch, malformed):
+        data = _login(client)
+        proposal = self._proposal(client, data["access_token"])
+        monkeypatch.setattr(settings, "gemini_api_key", "")
+
+        def invalid_result(self, context, prompt):
+            t = context.tasks[0]
+            item = {"start": "bad"} if malformed else ProposedBlock(
+                task_id=t.id, task_title=t.title,
+                start=_parse("2026-08-03T10:00:00Z"),
+                end=_parse("2026-08-03T09:00:00Z"), reason="invalid",
+            )
+            return ProviderResult(items=[item], reasoning="invalid")
+
+        monkeypatch.setattr(
+            "app.services.scheduling_service.HeuristicProvider.generate_schedule",
+            invalid_result,
+        )
+        response = client.post(
+            f"/api/v1/schedule/recommendations/{proposal['id']}/items/1/redo",
+            headers=_auth(data["access_token"]),
+        )
+        assert response.status_code == 200
+        assert response.json()["items"] == proposal["items"]
+        with SessionLocal() as db:
+            rec = db.get(AIRecommendation, uuid.UUID(proposal["id"]))
+            assert _parse(rec.recommendation["items"][1]["start"]) == _parse(proposal["items"][1]["start"])
 
     def test_cannot_redo_an_approved_item(self, client):
         data = _login(client)

@@ -17,6 +17,18 @@ from app.services.scheduling.validator import validate_schedule
 from app.services.scheduling.prompt_builder import build_prompt
 
 UTC = ZoneInfo("UTC")
+
+
+@pytest.fixture(autouse=True)
+def freeze_free_slot_clock(monkeypatch):
+    class FrozenDateTime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return datetime(2026, 8, 3, tzinfo=UTC).astimezone(tz)
+
+    monkeypatch.setattr("app.services.scheduling.free_slots.datetime", FrozenDateTime)
+
+
 def utc(s): return datetime.fromisoformat(s).astimezone(UTC)
 def slot(a,b): return TimeSlot(utc(a), utc(b))
 def task(title="Task", priority=TaskPriority.medium, duration=60, deadline=None, start_at=None, end_at=None):
@@ -185,4 +197,3 @@ class TestComprehensiveScheduler:
         res = provider.generate_schedule(ctx, build_prompt(ctx))
         assert len(res.items)==0
         print(f"\n20 Zero tasks: 0 blocks")
-

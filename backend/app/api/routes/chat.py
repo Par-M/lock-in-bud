@@ -51,10 +51,13 @@ def create_conversation(
     return ChatConversationResponse.model_validate(conv)
 
 
-@router.get("/conversations", response_model=list[ChatConversationResponse])
-def list_conversations(service: ChatService = Depends(_service)) -> list[ChatConversationResponse]:
+from app.schemas.chat import ChatConversationSummary
+
+
+@router.get("/conversations", response_model=list[ChatConversationSummary])
+def list_conversations(service: ChatService = Depends(_service)) -> list[ChatConversationSummary]:
     convs = service.list_conversations()
-    return [ChatConversationResponse.model_validate(c) for c in convs]
+    return [ChatConversationSummary.model_validate(c) for c in convs]
 
 
 @router.get("/conversations/{conversation_id}", response_model=ChatConversationResponse)
@@ -77,9 +80,9 @@ def send_message(
 ) -> ChatSendResponse:
     _rate_limit(str(service.user_id))
     try:
-        result = service.send_message(conversation_id, payload.content)
+        result = service.send_message(conversation_id, payload.content, timezone=payload.timezone)
     except ChatServiceError as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+        raise HTTPException(status_code=exc.status_code, detail=str(exc))
     return ChatSendResponse(
         conversation_id=result["conversation_id"],
         message=result["message"],

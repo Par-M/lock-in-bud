@@ -59,8 +59,9 @@ def working_windows(
     end_h, end_m = _hour_minute(end_hour)
     windows: list[TimeSlot] = []
     for day in dates:
-        start = datetime.combine(day, time(start_h, start_m), tzinfo=tz)
-        end = datetime.combine(day, time(end_h, end_m), tzinfo=tz)
+        midnight = datetime.combine(day, time(), tzinfo=tz)
+        start = midnight + timedelta(hours=start_h, minutes=start_m)
+        end = midnight + timedelta(hours=end_h, minutes=end_m)
         if end <= start:
             continue
         windows.append(TimeSlot(start, end))
@@ -86,6 +87,8 @@ def find_free_slots(
         # is clamped to "now", so recommendations/schedules never place work
         # into a block that has already passed.
         now = datetime.now(raw_window.start.tzinfo)
+        if raw_window.end <= now:
+            continue
         window = (
             TimeSlot(now, raw_window.end)
             if now > raw_window.start and now < raw_window.end

@@ -6,6 +6,8 @@ import uuid
 from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
+import pytest
+
 from app.models.task import TaskPriority
 from app.services.scheduling.context import ProposedBlock, ProviderResult, SchedulingContext, TaskContext, TimeSlot
 from app.services.scheduling.free_slots import find_free_slots
@@ -13,6 +15,16 @@ from app.services.scheduling.providers import HeuristicProvider
 from app.services.scheduling.validator import validate_schedule
 
 UTC = ZoneInfo("UTC")
+
+
+@pytest.fixture(autouse=True)
+def freeze_free_slot_clock(monkeypatch):
+    class FrozenDateTime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return datetime(2026, 8, 3, tzinfo=UTC).astimezone(tz)
+
+    monkeypatch.setattr("app.services.scheduling.free_slots.datetime", FrozenDateTime)
 
 
 def utc(value: str) -> datetime:

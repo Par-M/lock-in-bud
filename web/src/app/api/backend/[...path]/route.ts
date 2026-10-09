@@ -5,7 +5,7 @@ export const maxDuration = 120;
 export async function GET(request: NextRequest, context: { params: Promise<{ path: string[] }> }) {
   const { path } = await context.params;
   // Authentication tokens never pass through this browser-facing proxy.
-  const allowed = ["tasks", "habits", "calendar", "focus", "chat", "preferences", "notifications", "recommendations", "schedule"];
+  const allowed = ["tasks", "habits", "calendar", "focus", "chat", "preferences", "notifications", "recommendations", "schedule", "sync"];
   if (!allowed.includes(path[0]) || path.some(part => !/^[a-zA-Z0-9_-]+$/.test(part))) {
     return NextResponse.json({ detail: "Not found" }, { status: 404 });
   }

@@ -1,12 +1,15 @@
 import { expect, test } from "@playwright/test";
 
+const userId = "11111111-1111-4111-8111-111111111111";
+
 test.beforeEach(async ({ page }) => {
   await page.route("https://accounts.google.com/**", route => route.abort());
-  await page.route("**/api/session", route => route.fulfill({ json: { name: "Test User", email: "test@example.com" } }));
+  await page.route("**/api/session", route => route.fulfill({ json: { id: userId, name: "Test User", email: "test@example.com" } }));
   await page.route("**/api/backend/**", route => {
     const path = new URL(route.request().url()).pathname;
+    if (path.includes("/sync/")) return route.fulfill({ status: 404, json: { detail: "Sync is outside this mocked planner flow" } });
     const data = path.includes("/habits/dashboard") ? { habits: [] } :
-      path.includes("/focus/summary") ? { total_duration_seconds: 0, session_count: 0, analysis: null } :
+path.includes("/focus/summary") ? { total_duration_seconds: 0, session_count: 0 } :
       path.includes("/focus/sessions") || path.includes("/chat/conversations") ? [] :
       { items: [], total: 0 };
     return route.fulfill({ json: data });
@@ -41,6 +44,76 @@ test("focus timer survives reload without logging a session", async ({ page }) =
   await expect(page.getByRole("button", { name: "Stop & log session" })).toBeVisible();
 });
 
+test("focus insight is not rendered when analysis present", async ({ page }) => {
+  await page.route("**/api/backend/focus/summary", route => route.fulfill({ json: { total_duration_seconds: 5400, session_count: 3, analysis: "Productive day" } }));
+  await page.goto("/");
+  await page.getByRole("navigation").getByRole("button", { name: "Focus", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Focus summary" })).toBeVisible();
+  await expect(page.getByText("Focus insight")).toHaveCount(0);
+  await expect(page.getByText("Productive day")).toHaveCount(0);
+  await expect(page.getByText("focused minutes")).toBeVisible();
+  await expect(page.getByText("sessions", { exact: true })).toBeVisible();
+});
+
+test("assistant messages preserve text, sender alignment, and mocked send flow", async ({ page }) => {
+  const errors: string[] = [];
+  page.on("pageerror", error => errors.push(error.message));
+  const history = [
+    { id: "user-1", role: "user", content: "Plan my morning" },
+    { id: "assistant-1", role: "assistant", content: "Start with your top priority.\nThen take a break." },
+    { id: "system-1", role: "system", content: "Hidden system instructions" },
+    { id: "empty-1", role: "assistant", content: null },
+  ];
+  await page.route("**/api/backend/chat/conversations", route => route.fulfill({ json: [{ id: "chat-1", title: "Morning plan" }] }));
+  await page.route("**/api/backend/chat/conversations/chat-1", route => route.fulfill({ json: { id: "chat-1", title: "Morning plan", messages: history } }));
+  const sent: unknown[] = [];
+  const reply = `Make time for a short walk.\n${"A-long-unbroken-word".repeat(30)}`;
+  await page.route("**/api/backend/chat/conversations/chat-1/messages", route => {
+    sent.push(route.request().postDataJSON());
+    return route.fulfill({ json: {
+      message: { id: "user-2", role: "user", content: "What next?" },
+      assistant_message: { id: "assistant-2", role: "assistant", content: reply },
+    } });
+  });
+  await page.goto("/");
+  await page.getByRole("button", { name: "Open assistant" }).click();
+  const dialog = page.getByRole("dialog", { name: "Planner assistant" });
+  await dialog.getByRole("combobox", { name: "Conversation", exact: true }).selectOption("chat-1");
+  const messages = dialog.locator('[data-slot="message"]');
+  await expect(messages).toHaveCount(2);
+  await expect(dialog.getByRole("article", { name: "You", exact: true })).toHaveAttribute("data-align", "end");
+  await expect(dialog.getByRole("article", { name: "Assistant", exact: true })).toHaveAttribute("data-align", "start");
+  expect(await messages.nth(1).locator('[data-slot="bubble-content"]').textContent()).toBe(history[1].content);
+  await expect(dialog.getByText("Hidden system instructions")).toHaveCount(0);
+  await expect(dialog.locator('[data-slot="message-scroller"]')).toHaveCount(1);
+  await expect(messages.locator('[data-slot="message-avatar"] [data-slot="avatar"] [data-slot="avatar-fallback"]')).toHaveCount(2);
+  await expect(messages.locator('[data-slot="message-content"] [data-slot="bubble"] [data-slot="bubble-content"]')).toHaveCount(2);
+  const input = dialog.getByRole("textbox", { name: "Message", exact: true });
+  await input.fill("  What next?  ");
+  await dialog.getByRole("button", { name: "Send message", exact: true }).click();
+  await expect(messages).toHaveCount(4);
+  expect(sent).toEqual([{ content: "What next?" }]);
+  await expect(input).toHaveValue("");
+  expect(await messages.nth(3).locator('[data-slot="bubble-content"]').textContent()).toBe(reply);
+  await expect(dialog.getByRole("button", { name: "Send message", exact: true })).toBeDisabled();
+  for (const message of await messages.all()) {
+    const layout = await message.evaluate(element => {
+      const avatar = element.querySelector('[data-slot="message-avatar"]')!.getBoundingClientRect();
+      const bubble = element.querySelector('[data-slot="bubble"]')!.getBoundingClientRect();
+      const bounds = element.getBoundingClientRect();
+      return { align: element.getAttribute("data-align"), avatarLeft: avatar.left, avatarRight: avatar.right, bubbleLeft: bubble.left, bubbleRight: bubble.right, left: bounds.left, right: bounds.right };
+    });
+    expect(layout.bubbleLeft).toBeGreaterThanOrEqual(layout.left);
+    expect(layout.bubbleRight).toBeLessThanOrEqual(layout.right);
+    if (layout.align === "end") expect(layout.avatarLeft).toBeGreaterThan(layout.bubbleRight);
+    else expect(layout.avatarRight).toBeLessThan(layout.bubbleLeft);
+  }
+  const viewport = dialog.getByRole("region", { name: "Conversation messages" });
+  await expect(viewport).toBeVisible();
+  expect(await viewport.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
+  expect(errors).toEqual([]);
+});
+
 test("manifest and offline fallback are public and valid", async ({ request }) => {
   const manifest = await request.get("/manifest.webmanifest");
   expect(manifest.ok()).toBe(true);
@@ -49,7 +122,7 @@ test("manifest and offline fallback are public and valid", async ({ request }) =
   expect((await request.get("/offline.html")).ok()).toBe(true);
 });
 
-test("an uncertain focus write cannot be resent after reload", async ({ page }) => {
+test("a legacy uncertain focus write cannot be resent after reload", async ({ page }) => {
   let writes = 0;
   await page.route("**/api/backend/focus/sessions", route => {
     if (route.request().method() === "POST") {
@@ -58,25 +131,29 @@ test("an uncertain focus write cannot be resent after reload", async ({ page }) 
     }
     return route.fulfill({ json: [] });
   });
+  await page.addInitScript(id => {
+    const key = `planner.focus.v1:${id}`;
+    if (!localStorage.getItem(key)) localStorage.setItem(key, JSON.stringify({ started: Date.now() - 120000, ended: Date.now() - 60000, taskId: "", category: "", uncertain: "session" }));
+  }, userId);
   await page.goto("/");
-  await page.getByRole("navigation").getByRole("button", { name: "Focus", exact: true }).click();
-  await page.getByRole("button", { name: "Start focus session" }).click();
-  await page.getByRole("button", { name: "Stop & log session" }).click();
+  await page.getByRole("navigation").getByRole("button", { name: /Focus/ }).click();
   await expect(page.getByRole("button", { name: "Saving disabled: review required" })).toBeDisabled();
   await page.reload();
   await page.getByRole("navigation").getByRole("button", { name: /Focus/ }).click();
   await expect(page.getByRole("button", { name: "Saving disabled: review required" })).toBeDisabled();
-  expect(writes).toBe(1);
+  await expect(page.getByRole("button", { name: "Retry save", exact: true })).toHaveCount(0);
+  expect(writes).toBe(0);
 });
 
 test("timer changes synchronize across tabs", async ({ page, context }) => {
   await page.goto("/");
   await page.getByRole("navigation").getByRole("button", { name: "Focus", exact: true }).click();
   const other = await context.newPage();
-  await other.route("**/api/session", route => route.fulfill({ json: { name: "Test User", email: "test@example.com" } }));
+  await other.route("**/api/session", route => route.fulfill({ json: { id: userId, name: "Test User", email: "test@example.com" } }));
   await other.route("**/api/backend/**", route => {
     const path = new URL(route.request().url()).pathname;
-    return route.fulfill({ json: path.includes("/focus/sessions") ? [] : path.includes("/focus/summary") ? { total_duration_seconds: 0, session_count: 0, analysis: null } : { items: [], total: 0 } });
+    if (path.includes("/sync/")) return route.fulfill({ status: 404, json: { detail: "Sync is outside this mocked planner flow" } });
+    return route.fulfill({ json: path.includes("/focus/sessions") ? [] : path.includes("/focus/summary") ? { total_duration_seconds: 0, session_count: 0 } : { items: [], total: 0 } });
   });
   await other.goto("/");
   await expect(other.getByRole("heading", { name: "Schedule", exact: true })).toBeVisible();

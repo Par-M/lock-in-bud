@@ -93,6 +93,11 @@ enum OccurrenceDateKey {
     static func key(for date: Date) -> String {
         formatter.string(from: date)
     }
+
+    static func date(for key: String) -> Date? {
+        guard let date = formatter.date(from: key), self.key(for: date) == key else { return nil }
+        return date
+    }
 }
 
 struct TaskItem: Codable, Identifiable, Hashable, Sendable {

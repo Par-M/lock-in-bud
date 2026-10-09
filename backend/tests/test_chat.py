@@ -3,6 +3,7 @@ from unittest.mock import Mock
 from uuid import uuid4
 
 import httpx
+import pytest
 
 from app.api.routes import chat
 from app.core.config import settings
@@ -34,6 +35,7 @@ def test_chat_service_initializes_scheduling_service(monkeypatch):
 
 
 def test_chat_rate_limit_is_per_authenticated_user(client, monkeypatch):
+    monkeypatch.setattr(settings, "gemini_api_key", "test-key")
     monkeypatch.setattr(chat, "_user_rate", {})
     monkeypatch.setattr(chat.time, "time", lambda: 1000)
     monkeypatch.setattr(settings, "chat_rate_limit_rpm", 1)
@@ -75,6 +77,50 @@ def test_chat_rate_limit_is_per_authenticated_user(client, monkeypatch):
         user_b: {"count": 1, "window": 1000},
     }
     assert post.call_count == 2
+    for call in post.call_args_list:
+        assert call.kwargs["headers"] == {"x-goog-api-key": "test-key"}
+        assert "test-key" not in call.args[0]
+        assert call.kwargs["json"]["systemInstruction"] == {"parts": [{"text": SYSTEM_PROMPT}]}
+        assert call.kwargs["json"]["toolConfig"]["functionCallingConfig"]["mode"] == "NONE"
+
+
+@pytest.mark.parametrize(
+    "failure,expected_status,detail",
+    [
+        ("missing_key", 503, "not configured"),
+        (403, 503, "API credentials"),
+        (429, 429, "usage limit"),
+        (500, 502, "provider is unavailable"),
+        ("timeout", 502, "Unable to reach"),
+        ("empty", 502, "no text"),
+    ],
+)
+def test_chat_provider_failures_do_not_persist_messages(client, monkeypatch, failure, expected_status, detail):
+    monkeypatch.setattr(chat, "_user_rate", {})
+    monkeypatch.setattr(settings, "gemini_api_key", "" if failure == "missing_key" else "test-secret-key")
+    if failure == "timeout":
+        post = Mock(side_effect=httpx.ReadTimeout("Provider URL containing test-secret-key"))
+    else:
+        post = Mock(return_value=httpx.Response(
+            failure if isinstance(failure, int) else 200,
+            request=httpx.Request("POST", "https://example.test/gemini?key=test-secret-key"),
+            json={"candidates": []},
+        ))
+    monkeypatch.setattr(httpx, "post", post)
+    login = client.post("/api/v1/auth/dev", json={"name": "Chat Tester", "email": "chat-errors@test.dev"})
+    assert login.status_code == 200, login.text
+    headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
+    conversation = client.post("/api/v1/chat/conversations", headers=headers, json={})
+    assert conversation.status_code == 201, conversation.text
+    url = f"/api/v1/chat/conversations/{conversation.json()['id']}"
+    response = client.post(f"{url}/messages", headers=headers, json={"content": "Hello"})
+    assert response.status_code == expected_status, response.text
+    assert detail in response.json()["detail"]
+    assert "test-secret-key" not in response.text
+    saved = client.get(url, headers=headers)
+    assert saved.status_code == 200, saved.text
+    assert saved.json()["messages"] == []
+    assert post.call_count == (0 if failure == "missing_key" else 1)
 
 
 def test_chat_prompt_matches_registered_tools():

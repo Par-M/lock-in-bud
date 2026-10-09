@@ -2,19 +2,23 @@ import re
 import uuid
 from datetime import date
 from datetime import datetime
+from datetime import time
 from datetime import timedelta
 from zoneinfo import ZoneInfo
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.models.calendar_block import CalendarBlock
 from app.models.task import Task
 from app.models.task import TaskPriority
 from app.models.task import TaskStatus
 from app.models.user_preference import UserPreference
 from app.schemas.calendar import BusyTime
+from app.schemas.recommendation import MAX_RECOMMENDATION_DAYS
 from app.services.scheduling.context import TimeSlot
 from app.services.scheduling.free_slots import find_free_slots
+from app.services.scheduling.free_slots import merge_intervals
 
 PRIORITY_WEIGHT = {
     TaskPriority.high: 0,
@@ -135,6 +139,7 @@ class RecommendationService:
                 select(Task).where(
                     Task.user_id == self.user_id,
                     Task.is_archived.is_(False),
+                    Task.deleted_at.is_(None),
                     Task.status != TaskStatus.completed,
                     # Tasks with an explicit start time are already placed
                     # (fixed events); never re-recommend them.
@@ -148,7 +153,7 @@ class RecommendationService:
         return sorted(
             tasks,
             key=lambda t: (
-                t.deadline is not None and t.deadline < now,  # overdue first
+                not (t.deadline is not None and t.deadline < now),
                 t.deadline or now + timedelta(days=3650),  # soonest deadline
                 PRIORITY_WEIGHT.get(t.priority, 1),
             ),
@@ -182,28 +187,24 @@ class RecommendationService:
         slots: list[TimeSlot],
         used_by_slot: list[int],
         minutes: int,
+        *,
+        buffer_minutes: int = 0,
+        deadline: datetime | None = None,
+        earliest: datetime | None = None,
     ) -> tuple[datetime | None, datetime | None]:
-        """Assign a concrete start/end window for a recommended part by filling
-        the day's free slots in chronological order."""
-        remaining = minutes
-        start: datetime | None = None
-        end: datetime | None = None
-
+        """Place a whole part in one free slot; failure consumes no capacity."""
         for index, slot in enumerate(slots):
-            slot_free = slot.duration_minutes - used_by_slot[index]
-            if slot_free <= 0:
-                continue
             cursor = slot.start + timedelta(minutes=used_by_slot[index])
-            take = min(remaining, slot_free)
-            if start is None:
-                start = cursor
-            end = cursor + timedelta(minutes=take)
-            used_by_slot[index] += take
-            remaining -= take
-            if remaining <= 0:
-                break
-
-        return start, end
+            if earliest is not None:
+                cursor = max(cursor, earliest)
+            end = cursor + timedelta(minutes=minutes)
+            if end > slot.end or (deadline is not None and end > deadline):
+                continue
+            used_by_slot[index] = (
+                int((end - slot.start).total_seconds() // 60) + buffer_minutes
+            )
+            return cursor, end
+        return None, None
 
     def daily_recommendations(
         self,
@@ -218,9 +219,17 @@ class RecommendationService:
         today = now.astimezone(tz).date()
 
         window_start = start_date or today
-        window_end = end_date or (window_start + timedelta(days=6))
-        if window_end < window_start:
-            window_end = window_start
+        try:
+            window_end = end_date or (window_start + timedelta(days=6))
+            range_end = datetime.combine(
+                window_end + timedelta(days=1), time.min, tzinfo=tz
+            )
+        except OverflowError as exc:
+            raise ValueError("Recommendation range exceeds supported dates") from exc
+        if not 1 <= (window_end - window_start).days + 1 <= MAX_RECOMMENDATION_DAYS:
+            raise ValueError(
+                f"Recommendation range must be 1-{MAX_RECOMMENDATION_DAYS} days"
+            )
 
         dates = [
             window_start + timedelta(days=offset)
@@ -229,6 +238,107 @@ class RecommendationService:
 
         preference = self._preference()
         tasks = self._sort_tasks(self._active_tasks(), now)
+        buffer = max(0, preference.buffer_minutes)
+        range_start = datetime.combine(window_start, time.min, tzinfo=tz)
+        blocks = list(self.db.scalars(
+            select(CalendarBlock).where(
+                CalendarBlock.user_id == self.user_id,
+                CalendarBlock.deleted_at.is_(None),
+                CalendarBlock.end_at > range_start,
+                CalendarBlock.start_at < range_end,
+            )
+        ).all())
+        internal_busy = [TimeSlot(block.start_at, block.end_at) for block in blocks]
+        block_days = {
+            (block.task_id, block.start_at.astimezone(tz).date()) for block in blocks
+        }
+        fixed_tasks = self.db.scalars(
+            select(Task).where(
+                Task.user_id == self.user_id,
+                Task.is_archived.is_(False),
+                Task.deleted_at.is_(None),
+                Task.status != TaskStatus.completed,
+                Task.start_at.is_not(None),
+                Task.end_at.is_not(None),
+            )
+        ).all()
+        for task in fixed_tasks:
+            local_start = task.start_at.astimezone(tz)
+            local_end = task.end_at.astimezone(tz)
+            if not task.repeat_weekdays:
+                if (task.id, local_start.date()) not in block_days:
+                    internal_busy.append(TimeSlot(local_start, local_end))
+                continue
+            # Include the preceding day for overnight occurrences. Weekdays use
+            # the native Sunday=0 convention, not Python's Monday=0.
+            occurrence_days = set(dates)
+            if window_start > date.min:
+                occurrence_days.add(window_start - timedelta(days=1))
+            overrides = task.repeat_overrides or {}
+            # A moved occurrence can overlap this window even when its original
+            # local-date key is outside it. Timed overrides are absolute dates.
+            for key, override in overrides.items():
+                if override and (override.get("start_at") or override.get("end_at")):
+                    occurrence_days.add(date.fromisoformat(key))
+            for day in sorted(occurrence_days):
+                if (
+                    day < local_start.date()
+                    or (day.weekday() + 1) % 7 not in task.repeat_weekdays
+                ):
+                    continue
+                if (
+                    task.repeat_ends_on
+                    and day > task.repeat_ends_on.astimezone(tz).date()
+                ):
+                    continue
+                if (task.id, day) in block_days:
+                    continue
+                override = overrides.get(day.isoformat()) or {}
+                default_start = datetime.combine(day, local_start.timetz(), tzinfo=tz)
+                default_end = datetime.combine(
+                    day + (local_end.date() - local_start.date()),
+                    local_end.timetz(), tzinfo=tz,
+                )
+                if default_end <= default_start:
+                    default_end += timedelta(days=1)
+                occurrence_times = []
+                for field, default in (("start_at", default_start), ("end_at", default_end)):
+                    value = override.get(field)
+                    parsed = (
+                        datetime.fromisoformat(value.replace("Z", "+00:00"))
+                        if value else default
+                    )
+                    if parsed.tzinfo is None:
+                        parsed = parsed.replace(tzinfo=tz)
+                    occurrence_times.append(parsed.astimezone(tz))
+                start, end = occurrence_times
+                if start < end:
+                    internal_busy.append(TimeSlot(start, end))
+
+        committed_by_date: dict[date, int] = {}
+        merged_internal = merge_intervals(internal_busy)
+        for day in dates:
+            start = datetime.combine(day, time.min, tzinfo=tz)
+            end = datetime.combine(day + timedelta(days=1), time.min, tzinfo=tz)
+            committed_by_date[day] = sum(
+                int((min(slot.end, end) - max(slot.start, start)).total_seconds() // 60)
+                for slot in merged_internal
+                if slot.start < end and slot.end > start
+            )
+        committed_by_task: dict[uuid.UUID, int] = {}
+        pending_blocks = self.db.scalars(
+            select(CalendarBlock).where(
+                CalendarBlock.user_id == self.user_id,
+                CalendarBlock.deleted_at.is_(None),
+                CalendarBlock.completed_at.is_(None),
+                CalendarBlock.end_at > now,
+            )
+        ).all()
+        for block in pending_blocks:
+            committed_by_task[block.task_id] = (
+                committed_by_task.get(block.task_id, 0)
+                + max(0, int((block.end_at - block.start_at).total_seconds() // 60))
+            )
 
         # Free time is only computed for today onward. The window commonly
         # starts at the beginning of the current month (before today), and
@@ -238,13 +348,16 @@ class RecommendationService:
         free_slots = find_free_slots(
             dates=free_dates,
             busy=[
-                TimeSlot(busy.start, busy.end)
-                for busy in busy_times
-                if not busy.start.astimezone(tz).date() > window_end
+                TimeSlot(
+                    slot.start - timedelta(minutes=buffer),
+                    slot.end + timedelta(minutes=buffer),
+                )
+                for slot in [*internal_busy, *busy_times]
             ],
             start_hour=preference.work_hours_start,
             end_hour=preference.work_hours_end,
             timezone=timezone_name,
+            min_duration=timedelta(minutes=1),
         )
         slots_by_day: dict[date, list[TimeSlot]] = {}
         for slot in free_slots:
@@ -252,15 +365,22 @@ class RecommendationService:
 
         pending: list[tuple[Task, dict, int]] = []  # (task, part, part_count)
         for task in tasks:
-            # "Amount left" = estimated duration minus time already completed
-            # (recorded via the task's actual_duration). Tasks with nothing left
-            # are fully done and are not recommended again.
-            estimated = task.estimated_duration or 30
+            # Do not re-recommend completed work or work already committed to
+            # pending calendar blocks, including blocks outside this window.
+            estimated = task.estimated_duration or preference.default_duration_minutes
             completed = task.actual_duration or 0
-            amount_left = max(0, estimated - completed)
+            amount_left = max(
+                0, estimated - completed - committed_by_task.get(task.id, 0)
+            )
             if amount_left <= 0:
                 continue
             parts = split_task_into_parts(task.title, task.description, amount_left)
+            if amount_left < MIN_PART_MINUTES:
+                for part, minutes in zip(
+                    parts, _distribute_minutes(amount_left, len(parts))
+                ):
+                    part["minutes"] = minutes
+                parts = parts[:amount_left]
             for part in parts:
                 pending.append((task, part, len(parts)))
 
@@ -272,7 +392,10 @@ class RecommendationService:
             for day in dates
         }
         capacity_by_date: dict[date, int] = {
-            day: sum(slot.duration_minutes for slot in slots_by_date[day])
+            day: min(
+                sum(slot.duration_minutes for slot in slots_by_date[day]),
+                max(0, preference.max_daily_hours * 60 - committed_by_date[day]),
+            )
             for day in dates
         }
         used_by_slot: dict[date, list[int]] = {
@@ -307,6 +430,7 @@ class RecommendationService:
                 pending_by_task.append((task, [(part, part_count)]))
 
         def _pack(
+            task: Task,
             parts: list[tuple[dict, int]],
             eligible: set[int],
             start_index: int,
@@ -322,6 +446,8 @@ class RecommendationService:
             last = len(dates) - 1
             current = start_index
             placed: list[tuple[dict, int, date, datetime, datetime]] = []
+            earliest = None
+            deadline = task.deadline if task.deadline and task.deadline >= now else None
             for part, part_count in parts:
                 minutes = part["minutes"]
                 day_index = current
@@ -333,7 +459,8 @@ class RecommendationService:
                         and capacity_by_date[day] - used_date[day] >= minutes
                     ):
                         block_start, block_end = self._allocate_window(
-                            slots_by_date[day], used_slot[day], minutes
+                            slots_by_date[day], used_slot[day], minutes,
+                            buffer_minutes=buffer, deadline=deadline, earliest=earliest,
                         )
                         if block_start is not None:
                             break
@@ -345,6 +472,7 @@ class RecommendationService:
                     (part, part_count, dates[day_index], block_start, block_end)
                 )
                 current = day_index
+                earliest = block_end + timedelta(minutes=buffer)
             return placed
 
         for task, parts in pending_by_task:
@@ -365,7 +493,7 @@ class RecommendationService:
             used_date = dict(used_by_date)
             used_slot = {d: list(v) for d, v in used_by_slot.items()}
             placed = _pack(
-                parts, set(eligible), eligible[0], used_date, used_slot
+                task, parts, set(eligible), eligible[0], used_date, used_slot
             )
             if placed is None:
                 unscheduled.extend(
@@ -458,7 +586,7 @@ class RecommendationService:
         if task.deadline is None:
             return list(range(first_usable, last + 1))
         deadline_day = task.deadline.astimezone(tz).date()
-        if deadline_day < window_start or deadline_day < today_local:
+        if task.deadline < _utc_now():
             return (
                 list(range(first_usable, min(first_usable + 2, last + 1)))
                 or [first_usable]

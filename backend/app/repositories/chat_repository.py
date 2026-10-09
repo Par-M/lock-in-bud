@@ -19,8 +19,13 @@ def create_conversation(db: Session, *, user_id: UUID, title: str | None) -> Cha
     return conv
 
 
-def list_conversations(db: Session, *, user_id: UUID) -> list[ChatConversation]:
-    stmt = select(ChatConversation).where(ChatConversation.user_id == user_id).order_by(desc(ChatConversation.updated_at))
+def list_conversations(db: Session, *, user_id: UUID, limit: int = 50) -> list[ChatConversation]:
+    stmt = (
+        select(ChatConversation)
+        .where(ChatConversation.user_id == user_id)
+        .order_by(desc(ChatConversation.updated_at), desc(ChatConversation.created_at))
+        .limit(limit)
+    )
     return list(db.scalars(stmt).all())
 
 

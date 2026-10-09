@@ -13,6 +13,7 @@ from app.models.chat import ChatRole
 
 class ChatMessageCreate(BaseModel):
     content: str = Field(min_length=1, max_length=8000)
+    timezone: str | None = Field(default="UTC", max_length=64)
 
 
 class ChatConversationCreate(BaseModel):
@@ -41,6 +42,16 @@ class ChatConversationResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
     messages: list[ChatMessageResponse] | None = None
+
+
+class ChatConversationSummary(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    user_id: UUID
+    title: str | None
+    created_at: datetime
+    updated_at: datetime
 
 
 class ChatSendResponse(BaseModel):

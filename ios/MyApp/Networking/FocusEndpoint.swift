@@ -1,7 +1,7 @@
 import Foundation
 
 enum FocusEndpoint: Endpoint {
-    case sessions
+    case sessions(after: Date?, before: Date?)
     case summary(after: Date?, before: Date?)
     case create(FocusSessionCreate)
     case update(id: UUID, FocusSessionUpdate)
@@ -49,7 +49,7 @@ enum FocusEndpoint: Endpoint {
 
     var queryItems: [URLQueryItem]? {
         switch self {
-        case .summary(let after, let before):
+        case .sessions(let after, let before), .summary(let after, let before):
             var items: [URLQueryItem] = []
             let formatter = ISO8601DateFormatter()
             formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]

@@ -101,6 +101,18 @@ summary { cursor: pointer; min-height: 44px; padding: 8px 0; }
 .priority.medium { color: var(--orange); }
 .priority.low { color: var(--success); }
 .task-actions { display: flex; gap: 0; }
+.habit-grid .row, .card[aria-label="Schedule proposals"] .row { flex-wrap: wrap; }
+.card[aria-label="Schedule proposals"] .section-heading { flex-wrap: wrap; }
+.card[aria-label="Schedule proposals"] .recommendation { flex-wrap: wrap; }
+meter { max-width: 40%; accent-color: var(--accent); }
+@media (max-width: 700px) {
+  .task-toolbar { flex-wrap: wrap; }
+  .task-toolbar > .grow { flex-basis: 100%; }
+  .schedule-block { flex-wrap: wrap; }
+  .schedule-block > .grow { flex-basis: 100%; }
+  .session-row { flex-wrap: wrap; gap: 8px; }
+  .session-row > .grow { flex-basis: 100%; }
+}
 .habit-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
 .habit-grid .section-heading { margin: 0; align-items: flex-start; }
 .badge { border-radius: 8px; background: var(--bg); color: var(--muted); padding: 5px 8px; font-size: 12px; white-space: nowrap; }
@@ -124,9 +136,19 @@ progress { width: 100%; height: 8px; accent-color: var(--accent); margin: 0 0 8p
 .session-row:last-child { border: 0; padding-bottom: 0; }
 .session-row p { font-size: 13px; }
 .session-row > strong { white-space: nowrap; font-size: 14px; }
-.chat-history { min-height: 160px; max-height: 40dvh; overflow-y: auto; padding: 4px; display: flex; flex-direction: column; gap: 12px; }
-.message { background: var(--bg); border-radius: 12px; padding: 12px 16px; margin-right: 24px; }
-.message.user { background: var(--accent-soft); margin-right: 0; margin-left: 24px; }
+.message-scroller { position: relative; display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
+.chat-history { min-height: 160px; max-height: 40dvh; overflow-y: auto; overscroll-behavior: contain; padding: 4px; }
+.message-scroller-content { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.message { display: flex; width: 100%; min-width: 0; gap: 8px; }
+.message[data-align="end"] { flex-direction: row-reverse; }
+.message-avatar { flex-shrink: 0; align-self: flex-end; }
+.avatar { display: flex; width: 32px; height: 32px; border-radius: 50%; overflow: hidden; user-select: none; }
+.avatar-fallback { display: flex; width: 100%; height: 100%; align-items: center; justify-content: center; background: var(--bg); color: var(--muted); font-size: 13px; font-weight: 600; }
+.message-content { display: flex; flex: 1; min-width: 0; flex-direction: column; align-items: flex-start; }
+.message[data-align="end"] .message-content { align-items: flex-end; }
+.bubble { width: fit-content; max-width: 90%; min-width: 0; }
+.bubble-content { background: var(--bg); border-radius: 12px; padding: 12px 16px; overflow-wrap: anywhere; white-space: pre-wrap; }
+.message[data-align="end"] .bubble-content, .message[data-align="end"] .avatar-fallback { background: var(--accent-soft); }
 .message strong { font-size: 13px; color: var(--muted); }
 .message p { white-space: pre-wrap; margin-top: 4px; }
 .settings-account { padding-bottom: 16px; border-bottom: 1px solid var(--line); }
@@ -157,7 +179,7 @@ progress { width: 100%; height: 8px; accent-color: var(--accent); margin: 0 0 8p
   .task-list { padding: 0 16px; }
   .task-row { gap: 8px; flex-wrap: wrap; padding: 16px 0; }
   .task-row > .grow { flex-basis: calc(100% - 60px); }
-  .task-actions { width: 100%; flex-wrap: nowrap; justify-content: flex-end; padding-left: 40px; }
+  .task-actions { width: 100%; flex-wrap: wrap; justify-content: flex-end; }
   .task-toolbar { gap: 8px; flex-wrap: wrap; }
   .task-toolbar > .grow { flex-basis: 100%; }
   .task-toolbar > label:not(.grow) { flex: 1; }

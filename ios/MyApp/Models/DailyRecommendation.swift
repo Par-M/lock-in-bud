@@ -141,8 +141,8 @@ struct DailyRecommendationsRequest: Encodable, Sendable {
     func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(timezone, forKey: .timezone)
-        try container.encodeIfPresent(startDate, forKey: .startDate)
-        try container.encodeIfPresent(endDate, forKey: .endDate)
+        try container.encodeIfPresent(startDate.map { JSONCoding.calendarDay($0, timezone: timezone) }, forKey: .startDate)
+        try container.encodeIfPresent(endDate.map { JSONCoding.calendarDay($0, timezone: timezone) }, forKey: .endDate)
         try container.encode(busyTimes, forKey: .busyTimes)
     }
 }

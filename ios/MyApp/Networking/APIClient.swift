@@ -1,6 +1,7 @@
 import Foundation
 
 final class APIClient {
+    var userID: UUID? { keychain.loadSession()?.user.id }
     private let baseURL: URL
     private let keychain: KeychainManaging
 
@@ -22,7 +23,8 @@ final class APIClient {
     }
 
     func logout() async throws {
-        _ = try await send(AuthEndpoint.logout) as MessageResponse
+        guard let refreshToken = keychain.refreshToken else { return }
+        _ = try await send(AuthEndpoint.logout(refreshToken: refreshToken)) as MessageResponse
     }
 
     func refreshSession() async throws -> AuthSession {
@@ -34,6 +36,7 @@ final class APIClient {
     }
 
     private func send<T: Decodable>(_ endpoint: Endpoint, didRetry: Bool = false) async throws -> T {
+        let requestUserID = userID
         let urlRequest = try makeRequest(endpoint)
         let (data, response) = try await URLSession.shared.data(for: urlRequest)
 
@@ -42,15 +45,17 @@ final class APIClient {
         }
 
         if http.statusCode == 401, !didRetry, endpoint.requiresAuthentication, keychain.refreshToken != nil {
+            guard userID == requestUserID else { throw NetworkError.unauthorized }
             _ = try await refreshSession()
+            guard userID == requestUserID else { throw NetworkError.unauthorized }
+            if let auth = endpoint as? AuthEndpoint, case .logout = auth, let token = keychain.refreshToken {
+                return try await send(AuthEndpoint.logout(refreshToken: token), didRetry: true)
+            }
             return try await send(endpoint, didRetry: true)
         }
 
         guard (200..<300).contains(http.statusCode) else {
-            if http.statusCode == 401 {
-                throw NetworkError.unauthorized
-            }
-            throw NetworkError.httpStatus(http.statusCode)
+            throw NetworkError.response(status: http.statusCode, data: data)
         }
 
         do {
@@ -95,23 +100,22 @@ struct MessageResponse: Decodable {
 /// server used to treat as theft and revoke the user's entire session.
 ///
 /// Routing every refresh through this single-flight coordinator guarantees at
-/// most one in-flight refresh at a time; every concurrent caller awaits the
-/// same result and the refreshed token is written back once.
-private actor TokenRefresher {
+/// most one in-flight refresh per server/token pair; concurrent callers await
+/// the same result without sharing refreshes across accounts.
+@MainActor
+private final class TokenRefresher {
     static let shared = TokenRefresher()
 
-    private var inFlight: Task<AuthSession, Error>?
+    private var inFlight: [String: Task<AuthSession, Error>] = [:]
 
     func refresh(baseURL: URL, keychain: KeychainManaging) async throws -> AuthSession {
-        if let ongoing = inFlight {
+        guard let refreshToken = keychain.refreshToken else { throw NetworkError.unauthorized }
+        let flightKey = baseURL.absoluteString + "|" + refreshToken
+        if let ongoing = inFlight[flightKey] {
             return try await ongoing.value
         }
 
         let task = Task<AuthSession, Error> {
-            guard let refreshToken = keychain.refreshToken else {
-                throw NetworkError.unauthorized
-            }
-
             let url = baseURL.appending(path: AuthEndpoint.refresh(refreshToken: refreshToken).path)
             var request = URLRequest(url: url)
             request.httpMethod = HTTPMethod.post.rawValue
@@ -119,17 +123,21 @@ private actor TokenRefresher {
             request.httpBody = try JSONCoding.encoder.encode(RefreshRequest(refreshToken: refreshToken))
 
             let (data, response) = try await URLSession.shared.data(for: request)
-            guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
-                throw NetworkError.unauthorized
+            guard let http = response as? HTTPURLResponse else {
+                throw NetworkError.invalidResponse
+            }
+            guard (200..<300).contains(http.statusCode) else {
+                throw NetworkError.response(status: http.statusCode, data: data)
             }
 
             let session = try JSONCoding.decoder.decode(AuthSession.self, from: data)
+            guard keychain.refreshToken == refreshToken else { throw NetworkError.unauthorized }
             keychain.save(session)
             return session
         }
 
-        inFlight = task
-        defer { inFlight = nil }
+        inFlight[flightKey] = task
+        defer { inFlight[flightKey] = nil }
         return try await task.value
     }
 }

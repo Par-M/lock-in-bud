@@ -109,6 +109,7 @@ final class TaskService {
         repeatEndsOn: Date? = nil,
         checklist: [ChecklistItem]? = nil
     ) async throws -> TaskItem {
+        guard let userID = client.userID else { throw NetworkError.unauthorized }
         let request = TaskCreateRequest(
             title: title,
             description: description,
@@ -131,7 +132,7 @@ final class TaskService {
             let now = Date()
             let local = TaskItem(
                 id: UUID(),
-                userId: UUID(),
+                userId: userID,
                 title: request.title,
                 description: request.description,
                 deadline: request.deadline,
@@ -172,10 +173,11 @@ final class TaskService {
             return created
         } catch {
             if let store, isNetworkUnavailable(error) {
+                guard client.userID == userID else { throw NetworkError.unauthorized }
                 let now = Date()
                 let local = TaskItem(
                     id: UUID(),
-                    userId: UUID(),
+                    userId: userID,
                     title: request.title,
                     description: request.description,
                     deadline: request.deadline,

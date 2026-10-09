@@ -22,22 +22,35 @@ class ScheduleGenerateRequest(BaseModel):
     busy_times: list[BusyTime] = Field(default_factory=list)
     task_ids: list[uuid.UUID] | None = None
 
-    @field_validator("start_date", "end_date", mode="before")
+    @model_validator(mode="before")
     @classmethod
-    def parse_date(cls, value):
-        if isinstance(value, str):
-            try:
-                return date.fromisoformat(value)
-            except ValueError:
-                pass
-            try:
-                parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
-                return parsed.date()
-            except ValueError as exc:
-                raise ValueError(
-                    "Invalid date; expected YYYY-MM-DD or an ISO8601 datetime"
-                ) from exc
-        return value
+    def parse_dates(cls, values):
+        if not isinstance(values, dict):
+            return values
+        values = dict(values)
+        try:
+            tz = ZoneInfo(values.get("timezone", "UTC"))
+        except Exception as exc:
+            raise ValueError("Invalid IANA timezone") from exc
+        for key in ("start_date", "end_date"):
+            value = values.get(key)
+            if isinstance(value, str):
+                try:
+                    values[key] = date.fromisoformat(value)
+                    continue
+                except ValueError:
+                    pass
+                try:
+                    value = datetime.fromisoformat(value.replace("Z", "+00:00"))
+                except ValueError as exc:
+                    raise ValueError(
+                        "Invalid date; expected YYYY-MM-DD or an ISO8601 datetime"
+                    ) from exc
+            if isinstance(value, datetime):
+                values[key] = (
+                    value.astimezone(tz).date() if value.tzinfo else value.date()
+                )
+        return values
 
     @model_validator(mode="after")
     def validate_dates(self):

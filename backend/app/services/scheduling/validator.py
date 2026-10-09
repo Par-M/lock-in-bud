@@ -41,14 +41,17 @@ def _window_for(block_start: datetime, context: SchedulingContext):
     day = local.date()
     start_h, start_m = _hour_minute(context.work_start_hour)
     end_h, end_m = _hour_minute(context.work_end_hour)
-    start = datetime.combine(day, time(start_h, start_m), tzinfo=tz)
-    end = datetime.combine(day, time(end_h, end_m), tzinfo=tz)
+    midnight = datetime.combine(day, time(), tzinfo=tz)
+    start = midnight + timedelta(hours=start_h, minutes=start_m)
+    end = midnight + timedelta(hours=end_h, minutes=end_m)
     return start, end
 
 
 def validate_schedule(
     result: ProposedBlock | list[ProposedBlock],
     context: SchedulingContext,
+    *,
+    strict_availability: bool = False,
 ) -> ValidationResult:
     blocks = result if isinstance(result, list) else [result]
     validation = ValidationResult()
@@ -73,6 +76,11 @@ def validate_schedule(
     scheduled_minutes: dict[object, int] = {}
 
     for block in blocks:
+        if not isinstance(block, ProposedBlock) or not isinstance(
+            block.start, datetime
+        ) or not isinstance(block.end, datetime):
+            validation.errors.append("Malformed schedule block")
+            continue
         start = _normalize(block.start)
         end = _normalize(block.end)
 
@@ -88,6 +96,24 @@ def validate_schedule(
             continue
 
         task = tasks_by_id[block.task_id]
+        if strict_availability and not task.is_fixed:
+            tz = ZoneInfo(context.timezone)
+            horizon_end = (
+                datetime.combine(max(context.dates) + timedelta(days=1), time(), tzinfo=tz)
+                if context.dates else None
+            )
+            if (
+                not context.dates
+                or start.astimezone(tz).date() not in context.dates
+                or end > horizon_end
+                or not any(
+                    _normalize(slot.start) <= start and end <= _normalize(slot.end)
+                    for slot in context.free_slots
+                )
+            ):
+                validation.errors.append(
+                    f"'{block.task_title}' is outside available free slots or the scheduling horizon"
+                )
         if task.deadline is not None and end > _normalize(task.deadline):
             if task.is_overdue:
                 validation.warnings.append(
@@ -162,8 +188,15 @@ def validate_schedule(
                 )
 
     for index, (block, start, end) in enumerate(normalized):
-        for _other_block, other_start, other_end in normalized[(index + 1) :]:
+        for other_block, other_start, other_end in normalized[(index + 1) :]:
             if start < other_end and end > other_start:
+                if strict_availability and (
+                    not tasks_by_id[block.task_id].is_fixed
+                    or not tasks_by_id[other_block.task_id].is_fixed
+                ):
+                    validation.errors.append(
+                        f"'{block.task_title}' overlaps another scheduled block"
+                    )
                 validation.warnings.append(
                     f"'{block.task_title}' overlaps another scheduled block"
                 )
@@ -183,15 +216,29 @@ def validate_schedule(
     if context.max_daily_hours > 0:
         cap_minutes = context.max_daily_hours * 60
         tz = ZoneInfo(context.timezone)
-        daily_total: dict[date, int] = {}
+        daily_total = dict(context.committed_minutes_by_day) if strict_availability else {}
         daily_fixed: dict[date, int] = {}
+        daily_flexible: dict[date, int] = {}
         for block, start, end in normalized:
-            day = start.astimezone(tz).date()
-            minutes = int((end - start).total_seconds() // 60)
-            daily_total[day] = daily_total.get(day, 0) + minutes
-            if tasks_by_id[block.task_id].is_fixed:
-                daily_fixed[day] = daily_fixed.get(day, 0) + minutes
+            cursor = start.astimezone(tz)
+            local_end = end.astimezone(tz)
+            while cursor < local_end:
+                day = cursor.date()
+                day_end = datetime.combine(day + timedelta(days=1), time(), tzinfo=tz)
+                segment_end = min(local_end, day_end) if strict_availability else local_end
+                minutes = int((segment_end - cursor).total_seconds() // 60)
+                daily_total[day] = daily_total.get(day, 0) + minutes
+                if tasks_by_id[block.task_id].is_fixed:
+                    daily_fixed[day] = daily_fixed.get(day, 0) + minutes
+                else:
+                    daily_flexible[day] = daily_flexible.get(day, 0) + minutes
+                cursor = segment_end
         for day, total in daily_total.items():
+            if strict_availability and total > cap_minutes and daily_flexible.get(day, 0) > 0:
+                validation.errors.append(
+                    f"Schedules more than {context.max_daily_hours} hours of work "
+                    f"on {day.isoformat()} including retained commitments"
+                )
             if total > cap_minutes and daily_fixed.get(day, 0) <= cap_minutes:
                 validation.warnings.append(
                     f"Schedules more than {context.max_daily_hours} hours of "

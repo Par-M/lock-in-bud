@@ -379,7 +379,7 @@ class SyncService:
         task.repeat_weekdays = payload.repeat_weekdays
         task.repeat_ends_on = payload.repeat_ends_on
         task.repeat_overrides = (
-            {k: v.model_dump() for k, v in payload.repeat_overrides.items()}
+            {k: v.model_dump(mode="json") for k, v in payload.repeat_overrides.items()}
             if payload.repeat_overrides is not None
             else None
         )

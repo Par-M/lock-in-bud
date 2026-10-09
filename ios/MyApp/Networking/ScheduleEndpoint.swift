@@ -19,6 +19,15 @@ struct ScheduleGenerateRequest: Encodable, Sendable {
         case busyTimes = "busy_times"
         case taskIds = "task_ids"
     }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(JSONCoding.calendarDay(startDate, timezone: timezone), forKey: .startDate)
+        try container.encode(JSONCoding.calendarDay(endDate, timezone: timezone), forKey: .endDate)
+        try container.encode(timezone, forKey: .timezone)
+        try container.encode(busyTimes, forKey: .busyTimes)
+        try container.encodeIfPresent(taskIds, forKey: .taskIds)
+    }
 }
 
 enum ScheduleEndpoint: Endpoint {

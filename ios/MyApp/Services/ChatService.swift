@@ -50,15 +50,15 @@ final class ChatService {
         }
     }
 
-    func send(_ text: String) async {
-        guard let conv = currentConversation else {
-            if let c = await createConversation() {
-                await send(text)
-            }
-            return
-        }
+    func send(_ text: String) async -> Bool {
+        guard !isSending else { return false }
         isSending = true
         errorMessage = nil
+        defer { isSending = false }
+        if currentConversation == nil {
+            guard await createConversation() != nil else { return false }
+        }
+        guard let conv = currentConversation else { return false }
         do {
             let res: ChatSendResponse = try await client.request(
                 ChatEndpoint.sendMessage(conv.id, ChatMessageCreate(content: text))
@@ -68,10 +68,11 @@ final class ChatService {
                 messages.append(res.assistantMessage)
             }
             await loadConversations()
+            return true
         } catch {
             errorMessage = error.localizedDescription
+            return false
         }
-        isSending = false
     }
 
     func clearError() {
