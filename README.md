@@ -73,7 +73,7 @@ The backend can push reminders outside the app. Delivery requires APNs credentia
 ```
 .
 ├── backend/                  FastAPI service
-│   ├── api/index.py          Vercel serverless entry (runs DB migrations on cold start)
+│   ├── api/index.py          Vercel serverless entry (verifies DB schema on cold start)
 │   ├── app/
 │   │   ├── api/              Routers + auth dependency
 │   │   ├── core/             App settings (env-driven)
@@ -209,7 +209,7 @@ Open `ios/MyApp.xcodeproj` in Xcode, select the **MyApp** scheme, and run on a s
 
 The backend deploys to **Vercel** (project `lock-in-bud`) as a serverless function, so there is no container image or Dockerfile for the deployed backend. Local development and tests use a native PostgreSQL 17 installed with Homebrew (`brew services start postgresql@17`) — no Docker required. The project is Git-connected: every push to `main` auto-deploys production with the backend root at `backend/`. The database lives on **Neon**, so no Vercel-managed Postgres is required.
 
-- `backend/api/index.py` runs `alembic upgrade head` on cold start, so migrations apply automatically before requests are served.
+- Apply `python -m scripts.migrate` from `backend/` with the deployment database configured before releasing backend changes. `backend/api/index.py` verifies the schema on cold start and refuses to serve if migrations are missing; it does not apply migrations automatically.
 - Live URL: `https://lock-in-bud.vercel.app`
 
 ## Planner assistant
