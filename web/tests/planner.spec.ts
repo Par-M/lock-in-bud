@@ -19,7 +19,7 @@ path.includes("/focus/summary") ? { total_duration_seconds: 0, session_count: 0 
 test("native tabs fit desktop and mobile, with accessible task sheet", async ({ page }) => {
   const errors: string[] = [];
   page.on("pageerror", error => errors.push(error.message));
-  await page.goto("/");
+  await page.goto("/"); await page.getByRole("navigation").getByRole("button", { name: "Schedule", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Schedule", exact: true })).toBeVisible();
   for (const tab of ["Tasks", "Habits", "Focus", "Schedule"]) {
     await page.getByRole("navigation").getByRole("button", { name: tab, exact: true }).click();
@@ -35,7 +35,7 @@ test("native tabs fit desktop and mobile, with accessible task sheet", async ({ 
 });
 
 test("focus timer survives reload without logging a session", async ({ page }) => {
-  await page.goto("/");
+  await page.goto("/"); await page.getByRole("navigation").getByRole("button", { name: "Schedule", exact: true }).click();
   await page.getByRole("navigation").getByRole("button", { name: "Focus", exact: true }).click();
   await page.getByRole("button", { name: "Start focus session" }).click();
   await expect(page.getByRole("button", { name: "Stop & log session" })).toBeVisible();
@@ -46,7 +46,7 @@ test("focus timer survives reload without logging a session", async ({ page }) =
 
 test("focus insight is not rendered when analysis present", async ({ page }) => {
   await page.route("**/api/backend/focus/summary", route => route.fulfill({ json: { total_duration_seconds: 5400, session_count: 3, analysis: "Productive day" } }));
-  await page.goto("/");
+  await page.goto("/"); await page.getByRole("navigation").getByRole("button", { name: "Schedule", exact: true }).click();
   await page.getByRole("navigation").getByRole("button", { name: "Focus", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Focus summary" })).toBeVisible();
   await expect(page.getByText("Focus insight")).toHaveCount(0);
@@ -75,7 +75,7 @@ test("assistant messages preserve text, sender alignment, and mocked send flow",
       assistant_message: { id: "assistant-2", role: "assistant", content: reply },
     } });
   });
-  await page.goto("/");
+  await page.goto("/"); await page.getByRole("navigation").getByRole("button", { name: "Schedule", exact: true }).click();
   await page.getByRole("button", { name: "Open assistant" }).click();
   const dialog = page.getByRole("dialog", { name: "Planner assistant" });
   await dialog.getByRole("combobox", { name: "Conversation", exact: true }).selectOption("chat-1");
@@ -135,7 +135,7 @@ test("a legacy uncertain focus write cannot be resent after reload", async ({ pa
     const key = `planner.focus.v1:${id}`;
     if (!localStorage.getItem(key)) localStorage.setItem(key, JSON.stringify({ started: Date.now() - 120000, ended: Date.now() - 60000, taskId: "", category: "", uncertain: "session" }));
   }, userId);
-  await page.goto("/");
+  await page.goto("/"); await page.getByRole("navigation").getByRole("button", { name: "Schedule", exact: true }).click();
   await page.getByRole("navigation").getByRole("button", { name: /Focus/ }).click();
   await expect(page.getByRole("button", { name: "Saving disabled: review required" })).toBeDisabled();
   await page.reload();
@@ -146,7 +146,7 @@ test("a legacy uncertain focus write cannot be resent after reload", async ({ pa
 });
 
 test("timer changes synchronize across tabs", async ({ page, context }) => {
-  await page.goto("/");
+  await page.goto("/"); await page.getByRole("navigation").getByRole("button", { name: "Schedule", exact: true }).click();
   await page.getByRole("navigation").getByRole("button", { name: "Focus", exact: true }).click();
   const other = await context.newPage();
   await other.route("**/api/session", route => route.fulfill({ json: { id: userId, name: "Test User", email: "test@example.com" } }));
@@ -155,13 +155,13 @@ test("timer changes synchronize across tabs", async ({ page, context }) => {
     if (path.includes("/sync/")) return route.fulfill({ status: 404, json: { detail: "Sync is outside this mocked planner flow" } });
     return route.fulfill({ json: path.includes("/focus/sessions") ? [] : path.includes("/focus/summary") ? { total_duration_seconds: 0, session_count: 0 } : { items: [], total: 0 } });
   });
-  await other.goto("/");
+  await other.goto("/"); await other.getByRole("navigation").getByRole("button", { name: "Schedule", exact: true }).click();
   await expect(other.getByRole("heading", { name: "Schedule", exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Start focus session" }).click();
   await other.getByRole("navigation").getByRole("button", { name: /Focus/ }).click();
   await expect(other.getByRole("button", { name: "Stop & log session" })).toBeVisible();
-  other.once("dialog", dialog => dialog.accept());
   await other.getByRole("button", { name: "Discard session", exact: true }).click();
+  await other.getByRole("dialog", { name: "Confirm action" }).getByRole("button", { name: "Confirm", exact: true }).click();
   await expect(page.getByRole("button", { name: "Start focus session" })).toBeVisible();
   await other.close();
 });

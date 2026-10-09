@@ -20,6 +20,9 @@ struct ScheduleProposalView: View {
                     }
 
                     if let proposal = scheduleService.proposal {
+                        let remaining = proposal.items.filter { !$0.accepted }.count
+                        Text("Review before applying").font(.headline)
+                        Text("Adds \(remaining) proposed time blocks. Fixed events keep their times. Review each placement below; approving does not mark tasks complete.").font(.subheadline).foregroundStyle(.secondary)
                         if proposal.items.isEmpty {
                             ContentUnavailableView(
                                 "Nothing to Schedule",

@@ -1,10 +1,12 @@
 "use client";
 
-import { useEffect, useRef, useState, type ReactNode, type FormEvent } from "react";
+import { Fragment, useEffect, useRef, useState, type ReactNode, type FormEvent } from "react";
 import {
   CalendarDays,
+  Sun,
   ListChecks,
   CircleCheck,
+  Circle,
   Timer,
   Settings,
   MessageCircle,
@@ -20,6 +22,7 @@ import {
   Pencil,
   Trash2,
 } from "lucide-react";
+import { TodayScreen } from "@/components/today";
 import { Assistant } from "@/components/assistant";
 import { Sheet } from "@/components/sheet";
 import { api } from "@/lib/api";
@@ -103,11 +106,14 @@ type FocusRun = {
   taskId: string;
   category: string;
   ended?: number;
+  pausedAt?: number;
+  pausedMilliseconds?: number;
   sessionId?: string;
   uncertain?: "session" | "time";
 };
-type Tab = "Schedule" | "Tasks" | "Habits" | "Focus";
+type Tab = "Today" | "Schedule" | "Tasks" | "Habits" | "Focus";
 const tabs = [
+  { name: "Today", icon: Sun },
   { name: "Schedule", icon: CalendarDays },
   { name: "Tasks", icon: ListChecks },
   { name: "Habits", icon: CircleCheck },
@@ -148,6 +154,8 @@ function readFocusRun(key: string): FocusRun | null {
     typeof value.taskId !== "string" ||
     typeof value.category !== "string" ||
     (value.ended !== undefined && (!Number.isFinite(value.ended) || value.ended < value.started)) ||
+    (value.pausedAt !== undefined && (!Number.isFinite(value.pausedAt) || value.pausedAt < value.started || value.pausedAt > Date.now() || value.ended !== undefined)) ||
+    (value.pausedMilliseconds !== undefined && (!Number.isFinite(value.pausedMilliseconds) || value.pausedMilliseconds < 0 || value.pausedMilliseconds > (value.ended || value.pausedAt || Date.now()) - value.started)) ||
     (value.sessionId !== undefined && (typeof value.sessionId !== "string" || !value.sessionId || value.ended === undefined)) ||
     (value.operationId !== undefined && ((value.sessionId !== undefined && value.sessionId !== value.operationId) || value.uncertain === "time")) ||
     (value.uncertain !== undefined && (!["session", "time"].includes(value.uncertain) || value.ended === undefined))
@@ -241,6 +249,7 @@ function RepeatDays({ value, onChange }: { value: number[]; onChange: (days: num
 }
 
 function TaskForm({ task, onSave, busy }: { task: Task | null; onSave: (body: Record<string, unknown>) => void; busy: boolean }) {
+  const [eventType, setEventType] = useState(!!task?.start_at);
   const [days, setDays] = useState(task?.repeat_weekdays || []);
   const [checklist, setChecklist] = useState(task?.checklist || []);
   const [validationError, setValidationError] = useState("");
@@ -286,7 +295,7 @@ function TaskForm({ task, onSave, busy }: { task: Task | null; onSave: (body: Re
       priority: data.get("priority"),
       status: data.get("status"),
       estimated_duration: data.get("estimated_duration") ? Number(data.get("estimated_duration")) : null,
-      actual_duration: data.get("actual_duration") !== "" ? Number(data.get("actual_duration")) : null,
+      actual_duration: task && data.get("actual_duration") !== "" ? Number(data.get("actual_duration")) : null,
       category: data.get("category") || null,
       deadline: deadline ? new Date(deadline).toISOString() : null,
       start_at: startAt,
@@ -315,68 +324,14 @@ function TaskForm({ task, onSave, busy }: { task: Task | null; onSave: (body: Re
         Title
         <input autoFocus required name="title" maxLength={255} defaultValue={task?.title} placeholder="What needs to get done?" />
       </label>
-      <div className="form-grid">
-        <label>
-          Priority
-          <select name="priority" defaultValue={task?.priority || defaults?.default_priority || "medium"}>
-            <option value="low">Low</option>
-            <option value="medium">Medium</option>
-            <option value="high">High</option>
-          </select>
-        </label>
-        <label>
-          Status
-          <select name="status" defaultValue={task?.status || "pending"}>
-            <option value="pending">Pending</option>
-            <option value="in_progress">In progress</option>
-            <option value="completed">Completed (entire task)</option>
-          </select>
-        </label>
-        <label>
-          Estimated minutes
-          <input
-            name="estimated_duration"
-            type="number"
-            min={1}
-            max={525600}
-            defaultValue={task ? (task.estimated_duration ?? "") : (defaults?.default_duration_minutes ?? "")}
-          />
-        </label>
-        <label>
-          Actual minutes
-          <input name="actual_duration" type="number" min={0} max={525600} defaultValue={task?.actual_duration ?? ""} />
-        </label>
-        <p className="muted small">Actual minutes replace the tracked total and determine duration progress. Focus history is not changed.</p>
-        <label>
-          Category
-          <input name="category" list="planner-categories" maxLength={100} defaultValue={task?.category || ""} />
-        </label>
-      </div>
-      <label>
-        Deadline
-        <input name="deadline" type="datetime-local" defaultValue={localInput(task?.deadline || null)} />
-      </label>
-      <fieldset className="stack compact">
-        <legend>
-          Fixed event <span className="muted">(optional)</span>
-        </legend>
-        <div className="form-grid">
-          <label>
-            Starts
-            <input name="start_at" type="datetime-local" defaultValue={localInput(task?.start_at || null)} />
-          </label>
-          <label>
-            Ends
-            <input name="end_at" type="datetime-local" defaultValue={localInput(task?.end_at || null)} />
-          </label>
-        </div>
-        <p className="muted small">Set both times to place this task on the calendar. Repeat days use these local times.</p>
-        {validationError && (
-          <p className="error" role="alert">
-            {validationError}
-          </p>
-        )}
-      </fieldset>
+      <fieldset><legend>What are you adding?</legend><div className="row"><button type="button" aria-pressed={!eventType} onClick={() => setEventType(false)}>Task</button><button type="button" aria-pressed={eventType} onClick={() => setEventType(true)}>Event</button></div></fieldset>
+      {!eventType && <div className="form-grid"><label>Deadline<input name="deadline" type="datetime-local" defaultValue={localInput(task?.deadline || null)} /></label><label>Estimated minutes<input name="estimated_duration" type="number" min={1} max={525600} defaultValue={task ? task.estimated_duration ?? "" : defaults?.default_duration_minutes ?? ""} /></label></div>}
+      {eventType && <fieldset className="stack compact"><legend>Event times</legend><div className="form-grid"><label>Starts<input required name="start_at" type="datetime-local" defaultValue={localInput(task?.start_at || null)} /></label><label>Ends<input required name="end_at" type="datetime-local" defaultValue={localInput(task?.end_at || null)} /></label></div><p className="muted small">Fixed events stay at these times when planning.</p></fieldset>}
+      {validationError && <p className="error" role="alert">{validationError}</p>}
+      <details open={task ? true : undefined}><summary>More options</summary><div className="stack">
+      <div className="form-grid"><label>Priority<select name="priority" defaultValue={task?.priority || defaults?.default_priority || "medium"}><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option></select></label>
+      {task ? <><label>Status<select name="status" defaultValue={task.status}><option value="pending">Pending</option><option value="in_progress">In progress</option><option value="completed">Completed (entire task)</option></select></label><label>Actual minutes<input name="actual_duration" type="number" min={0} max={525600} defaultValue={task.actual_duration ?? ""} /></label><p className="muted small">Time tracked does not mark the task complete. Focus history is unchanged.</p></> : <input type="hidden" name="status" value="pending" />}
+      <label>Category<input name="category" list="planner-categories" maxLength={100} defaultValue={task?.category || ""} /></label></div>
       <label>
         Description
         <textarea name="description" defaultValue={task?.description || ""} rows={2} />
@@ -424,6 +379,7 @@ function TaskForm({ task, onSave, busy }: { task: Task | null; onSave: (body: Re
           <input type="date" name="repeat_ends_on" defaultValue={task?.repeat_ends_on ? dateKey(new Date(task.repeat_ends_on)) : ""} />
         </label>
       )}
+      </div></details>
       <button className="primary" disabled={busy}>
         {busy ? "Saving..." : task ? "Save changes" : "Create task"}
       </button>
@@ -601,7 +557,7 @@ function SchedulingPreferences({ onSaved }: { onSaved: () => void }) {
 
 export default function Planner({ user, onLogout }: { user: { id: string; name: string | null; email: string | null }; onLogout: () => Promise<void> }) {
   const [availability, setAvailability] = useState(emptyCalendarAvailability);
-  const [tab, setTab] = useState<Tab>("Schedule");
+  const [tab, setTab] = useState<Tab>("Today");
   const [reload, setReload] = useState(0);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [archivedTasks, setArchivedTasks] = useState<Task[]>([]);
@@ -612,6 +568,9 @@ export default function Planner({ user, onLogout }: { user: { id: string; name: 
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
   const [error, setError] = useState("");
+  const [notice, setNotice] = useState<{ text: string; undo?: () => Promise<void> } | null>(null);
+  const [confirmation, setConfirmation] = useState<{ text: string; resolve: (answer: boolean) => void } | null>(null);
+  const confirmAction = (text: string) => new Promise<boolean>(resolve => setConfirmation({ text, resolve }));
   const [busy, setBusy] = useState(false);
   const [sheet, setSheet] = useState<"task" | "habit" | "block" | "occurrence" | "reschedule" | "session" | "settings" | "assistant" | null>(null);
   const [editing, setEditing] = useState<Task | null>(null);
@@ -642,7 +601,9 @@ export default function Planner({ user, onLogout }: { user: { id: string; name: 
   const [clock, setClock] = useState(Date.now());
   const [timerReady, setTimerReady] = useState(false);
   const [timerIssue, setTimerIssue] = useState("");
-  const operationBusy = useRef(false);
+  const operationBusy = useRef(new Set<string>());
+  const [pendingRows, setPendingRows] = useState(new Set<string>());
+  const [rowErrors, setRowErrors] = useState<Record<string, string>>({});
   const [focusTask, setFocusTask] = useState("");
   const [focusCategory, setFocusCategory] = useState("");
   const [theme, setTheme] = useState("system");
@@ -709,7 +670,7 @@ export default function Planner({ user, onLogout }: { user: { id: string; name: 
           const result = await api<{ items: Task[] }>(`/tasks?archived=true&${taskQuery}`);
           if (active) setArchivedTasks(result.items);
         }
-        if (tab === "Schedule") {
+        if (tab === "Schedule" || tab === "Today") {
           const result = await api<{ items: Block[] }>("/calendar/blocks");
           if (active) setBlocks(result.items);
         }
@@ -723,6 +684,7 @@ export default function Planner({ user, onLogout }: { user: { id: string; name: 
           start.setHours(0, 0, 0, 0);
           const query = `?after=${encodeURIComponent(start.toISOString())}&before=${encodeURIComponent(new Date().toISOString())}`;
           const [history, stats] = await Promise.all([api<Session[]>(`/focus/sessions${query}`), api<Summary>(`/focus/summary${query}`)]);
+          if (!Array.isArray(history) || typeof stats.total_duration_seconds !== "number") throw new Error("Focus history could not be loaded. Please retry.");
           if (active) {
             setSessions(history);
             setSummary(stats);
@@ -757,7 +719,7 @@ export default function Planner({ user, onLogout }: { user: { id: string; name: 
       } catch (e) {
         setTimerReady(false);
         setTimerIssue(
-          `Focus storage is unavailable or invalid. Durability cannot be guaranteed, so timer changes and saving are disabled. Existing storage is left untouched. ${errorText(e)}`,
+          `Your saved timer could not be read. Timer changes are paused to protect your session. Keep this page open and check focus history. ${errorText(e)}`,
         );
       }
     }
@@ -782,9 +744,8 @@ export default function Planner({ user, onLogout }: { user: { id: string; name: 
     };
   }, [timerKey]);
   useEffect(() => {
-    if (!run || run.ended) return;
     setClock(Date.now());
-    const id = window.setInterval(() => setClock(Date.now()), 1000);
+    const id = window.setInterval(() => setClock(Date.now()), run && !run.ended ? 1000 : 60_000);
     return () => window.clearInterval(id);
   }, [run]);
   useEffect(() => {
@@ -795,20 +756,22 @@ export default function Planner({ user, onLogout }: { user: { id: string; name: 
       /* Theme still applies when storage is unavailable. */
     }
   }, [theme]);
-  async function act(action: () => Promise<void>, close = false) {
-    if (operationBusy.current) return;
-    operationBusy.current = true;
-    setBusy(true);
-    setError("");
+  async function act(action: () => Promise<void>, close = false, key = "global") {
+    if (operationBusy.current.has(key)) return;
+    operationBusy.current.add(key);
+    if (key === "global") { setBusy(true); setError(""); }
+    else { setPendingRows(previous => new Set(previous).add(key)); setRowErrors(previous => ({ ...previous, [key]: "" })); }
     try {
       await action();
       if (close) setSheet(null);
       refresh();
     } catch (e) {
-      setError(errorText(e));
+      if (key === "global") setError(errorText(e));
+      else setRowErrors(previous => ({ ...previous, [key]: errorText(e) }));
     } finally {
-      operationBusy.current = false;
-      setBusy(false);
+      operationBusy.current.delete(key);
+      if (key === "global") setBusy(false);
+      else setPendingRows(previous => { const next = new Set(previous); next.delete(key); return next; });
     }
   }
   function openTask(task: Task | null = null) {
@@ -838,13 +801,18 @@ export default function Planner({ user, onLogout }: { user: { id: string; name: 
         );
       else if (taskDone(task, date)) await api(`/tasks/${task.id}`, request("PATCH", { status: "pending" }));
       else await api(`/tasks/${task.id}/complete`, request("POST", { timezone: timezone() }));
-    });
+      setNotice({ text: taskDone(task, date) ? "Task reopened" : "Task completed", undo: async () => {
+        if (task.repeat_weekdays?.length) await api(`/tasks/${task.id}/occurrence/completion`, request("PATCH", { date, completed: taskDone(task, date), timezone: timezone() }));
+        else await api(`/tasks/${task.id}`, request("PATCH", { status: task.status }));
+        refresh();
+      } });
+    }, false, task.id);
   }
   async function withFocusLock(action: (current: FocusRun | null) => Promise<void>) {
     if (!uuidPattern.test(user.id)) throw new Error("A valid account ID is required to change the focus timer. No writes were sent.");
     if (!navigator.locks)
       throw new Error(
-        "Automatic focus saving is unavailable without Web Locks. No writes were sent. Use a supported browser and check history/task time before discarding pending work.",
+        "Your browser cannot safely coordinate focus sessions. No changes were sent. Use a supported browser and check focus history before discarding pending work.",
       );
     await navigator.locks.request(timerKey, { ifAvailable: true }, async (lock) => {
       if (!lock) throw new Error("Another tab is changing this focus session. Wait for it to finish; no writes were sent from this tab.");
@@ -868,7 +836,7 @@ export default function Planner({ user, onLogout }: { user: { id: string; name: 
     } catch {
       setTimerReady(false);
       setTimerIssue(
-        "Focus state could not be persisted. Durability cannot be guaranteed. Keep this page open, check session history and task time, and do not resend writes.",
+        "Your browser could not save the timer. Keep this page open and check focus history and task time before trying again.",
       );
       throw new Error("Focus storage failed. No further API writes will be sent.");
     }
@@ -887,8 +855,21 @@ export default function Planner({ user, onLogout }: { user: { id: string; name: 
           category: focusCategory.trim() || tasks.find((t) => t.id === taskId)?.category || "",
         });
         setClock(started);
+        const task = tasks.find(t => t.id === taskId);
+        if (task?.status === "pending") {
+          try { await api(`/tasks/${taskId}/start`, request("POST")); }
+          catch { setNotice({ text: "Timer started. Task status could not be updated; check it when you’re online." }); }
+        }
       }),
     );
+  }
+  function pauseFocus() {
+    void act(async () => withFocusLock(async current => {
+      if (!current || current.ended) return;
+      const now = Date.now();
+      persistFocus(current.pausedAt ? { ...current, pausedAt: undefined, pausedMilliseconds: (current.pausedMilliseconds || 0) + now - current.pausedAt } : { ...current, pausedAt: now });
+      setClock(now);
+    }));
   }
   async function saveFocus() {
     if (!run) return;
@@ -906,8 +887,10 @@ export default function Planner({ user, onLogout }: { user: { id: string; name: 
           operationId: current.operationId || crypto.randomUUID(),
           ended: current.ended ?? Math.max(Date.now(), current.started + 1000),
           uncertain: "session",
+          pausedMilliseconds: (current.pausedMilliseconds || 0) + (current.pausedAt ? Date.now() - current.pausedAt : 0),
+          pausedAt: undefined,
         };
-        const seconds = Math.max(1, Math.floor((pending.ended - pending.started) / 1000));
+        const seconds = Math.max(1, Math.floor((pending.ended - pending.started - (pending.pausedMilliseconds || 0)) / 1000));
         if (seconds > 2592000) throw new Error("This session exceeds the API's 30-day limit. Discard it and start a new session.");
         persistFocus({ ...pending });
         try {
@@ -945,7 +928,7 @@ export default function Planner({ user, onLogout }: { user: { id: string; name: 
         if (!current || current.id !== run.id || current.operationId !== run.operationId || current.started !== run.started || current.taskId !== run.taskId)
           throw new Error("The focus session changed in another tab. Review the synchronized timer before discarding it.");
         if (
-          window.confirm(
+          await confirmAction(
             current.ended !== undefined
               ? "Check session history and task time first. Discard only this pending browser state? Saved server data will remain, and no API writes will be sent."
               : "Discard this focus session without saving?",
@@ -1005,7 +988,7 @@ export default function Planner({ user, onLogout }: { user: { id: string; name: 
       completed: taskDone(event.task, event.occurrence_date),
     })),
   ].sort((a, b) => a.start_at.localeCompare(b.start_at));
-  const elapsed = run ? Math.max(0, Math.floor(((run.ended || clock) - run.started) / 1000)) : 0;
+  const elapsed = run ? Math.max(0, Math.floor(((run.ended || run.pausedAt || clock) - run.started - (run.pausedMilliseconds || 0)) / 1000)) : 0;
   const timerText = `${String(Math.floor(elapsed / 3600)).padStart(2, "0")}:${String(Math.floor(elapsed / 60) % 60).padStart(2, "0")}:${String(elapsed % 60).padStart(2, "0")}`;
   const calendarStart = new Date(month);
   calendarStart.setDate(1 - month.getDay());
@@ -1030,6 +1013,23 @@ export default function Planner({ user, onLogout }: { user: { id: string; name: 
       return totals;
     }, {}),
   ).sort(([a], [b]) => a.localeCompare(b));
+  const activeTasks = tasks.filter(t => !t.is_archived && !taskDone(t)).sort((a,b) => (a.deadline || "9999").localeCompare(b.deadline || "9999"));
+  const todayTasks = activeTasks.filter(t => (t.repeat_weekdays?.includes(new Date().getDay()) && (!t.start_at || dateKey(new Date(t.start_at)) <= today) && (!t.repeat_ends_on || dateKey(new Date(t.repeat_ends_on)) >= today)) || (t.deadline && dateKey(new Date(t.deadline)) <= today) || (t.start_at && dateKey(new Date(t.start_at)) === today));
+  const taskGroup = (t: Task) => {
+    if (t.is_archived) return "Archived";
+    if (taskDone(t)) return "Completed";
+    if (t.repeat_weekdays?.length) return t.repeat_weekdays.includes(new Date().getDay()) && (!t.repeat_ends_on || dateKey(new Date(t.repeat_ends_on)) >= today) ? "Today" : "Upcoming";
+    const date = t.deadline || t.start_at;
+    if (!date) return "Unscheduled";
+    if (t.deadline && new Date(t.deadline).getTime() < clock) return "Overdue";
+    return dateKey(new Date(date)) < today ? "Overdue" : dateKey(new Date(date)) === today ? "Today" : "Upcoming";
+  };
+  const groupOrder = ["Overdue", "Today", "Upcoming", "Unscheduled", "Completed", "Archived"];
+  const groupedTasks = [...displayedTasks].sort((a,b) => groupOrder.indexOf(taskGroup(a)) - groupOrder.indexOf(taskGroup(b)));
+  const nextTask = [...todayTasks, ...activeTasks].find(t => !t.start_at);
+  const todayStart = new Date(); todayStart.setHours(0,0,0,0);
+  const todayEnd = new Date(todayStart); todayEnd.setDate(todayEnd.getDate() + 1);
+  const nextEvent = [...blocks.filter(b => !b.completed_at), ...fixedEventsForDay(tasks.filter(t => !taskDone(t)), blocks, todayStart).map(e => ({ title: e.task.title, start_at: e.start_at, end_at: e.end_at }))].filter(b => new Date(b.start_at).getTime() < todayEnd.getTime() && new Date(b.end_at).getTime() > clock).sort((a,b) => a.start_at.localeCompare(b.start_at))[0];
   return (
     <div className="planner">
       <datalist id="planner-categories">
@@ -1039,7 +1039,7 @@ export default function Planner({ user, onLogout }: { user: { id: string; name: 
       </datalist>
       <header className="app-header">
         <a className="brand" href="#main">
-          <CalendarDays /> <span>My Planner</span>
+          <CalendarDays /> <span>Lock In Bud</span>
         </a>
         <div className="header-actions">
           <button className="icon-button" aria-label="Open assistant" onClick={() => setSheet("assistant")}>
@@ -1073,8 +1073,11 @@ export default function Planner({ user, onLogout }: { user: { id: string; name: 
           </button>
         ))}
       </nav>
+      {run && tab !== "Focus" && <aside className="focus-strip" aria-label="Active focus session"><span className="grow">{tasks.find(t => t.id === run.taskId)?.title || "Focus session"} · <span role="timer">{timerText}</span></span><button onClick={() => setTab("Focus")}>Open timer</button>{!run.ended && <button disabled={busy || !timerReady} onClick={pauseFocus}>{run.pausedAt ? "Resume" : "Pause"}</button>}<button disabled={busy || !timerReady} onClick={() => void saveFocus()}>{run.ended ? "Retry save" : "Stop and save"}</button></aside>}
+      {notice && <div className="feedback-strip" role="status"><span>{notice.text}</span>{notice.undo && <button disabled={busy} onClick={() => void act(async () => { await notice.undo!(); setNotice(null); })}>Undo</button>}<button aria-label="Dismiss notification" onClick={() => setNotice(null)}>Dismiss</button></div>}
+      {confirmation && <Sheet title="Confirm action" onClose={() => { confirmation.resolve(false); setConfirmation(null); }}><p>{confirmation.text}</p><div className="row"><button autoFocus onClick={() => { confirmation.resolve(false); setConfirmation(null); }}>Cancel</button><button className="danger" onClick={() => { confirmation.resolve(true); setConfirmation(null); }}>Confirm</button></div></Sheet>}
       <main id="main">
-        <CalendarAvailability value={availability} onChange={setAvailability} />
+        {tab === "Schedule" && <CalendarAvailability value={availability} onChange={setAvailability} />}
         <div className="page-heading">
           <div>
             <p className="eyebrow">
@@ -1098,11 +1101,12 @@ export default function Planner({ user, onLogout }: { user: { id: string; name: 
                   setEditingHabit(null);
                   setEditingBlock(null);
                   if (tab === "Tasks") openTask();
+                  else if (tab === "Today") openTask();
                   else setSheet(tab === "Habits" ? "habit" : "block");
                 }}
               >
                 <Plus />
-                <span>{tab === "Tasks" ? "New task" : tab === "Habits" ? "New habit" : "Add block"}</span>
+                <span>{tab === "Tasks" || tab === "Today" ? "New task" : tab === "Habits" ? "New habit" : "Add block"}</span>
               </button>
             )}
           </div>
@@ -1124,6 +1128,15 @@ export default function Planner({ user, onLogout }: { user: { id: string; name: 
             Loading {tab.toLowerCase()}...
           </p>
         )}
+        {tab === "Today" && <TodayScreen
+          tasks={todayTasks} nextTask={nextTask} nextEvent={nextEvent}
+          focusTitle={run ? tasks.find(t => t.id === run.taskId)?.title || "Focus session in progress" : null}
+          busy={busy} loading={loading} timerReady={timerReady} pending={pendingRows} errors={rowErrors}
+          onAdd={() => openTask()} onEdit={id => openTask(tasks.find(t => t.id === id))}
+          onComplete={id => { const task = tasks.find(t => t.id === id); if (task) toggleTask(task); }}
+          onFocus={id => run ? setTab("Focus") : startFocus(id || "")}
+          onSchedule={() => { setSelectedDate(today); setTab("Schedule"); }} onTasks={() => setTab("Tasks")}
+        />}
         {tab === "Schedule" && (
           <div className="schedule-layout">
             <section className="card calendar-card" aria-label="Month calendar">
@@ -1263,8 +1276,8 @@ export default function Planner({ user, onLogout }: { user: { id: string; name: 
                           className="icon-button danger"
                           disabled={busy}
                           aria-label={`Delete block ${entry.title}`}
-                          onClick={() => {
-                            if (window.confirm(`Delete schedule block "${entry.title}"?`))
+                          onClick={async () => {
+                            if (await confirmAction(`Delete schedule block "${entry.title}"?`))
                               void act(async () => {
                                 await api(`/calendar/blocks/${entry.block.id}`, request("DELETE"));
                               });
@@ -1410,38 +1423,35 @@ export default function Planner({ user, onLogout }: { user: { id: string; name: 
               {!displayedTasks.length && !loading && !loadError && (
                 <div className="empty">
                   <h2>{search ? "No matching tasks" : "Nothing here yet"}</h2>
-                  <p>{search ? "Try another search." : "Create a task to get started, or change the filter."}</p>
+                  <p>{search ? "Try another search." : "Create a task to get started, or change the filter."}</p><button onClick={() => search || filter !== "active" ? (setSearch(""), setFilter("active")) : openTask()}>{search || filter !== "active" ? "Clear filters" : "Add your first task"}</button>
                 </div>
               )}
-              {displayedTasks.map((task) => (
+              {groupedTasks.map((task, index) => (<Fragment key={task.id}>{(index === 0 || taskGroup(groupedTasks[index - 1]) !== taskGroup(task)) && <h2 className="task-group-heading">{taskGroup(task)}</h2>}
                 <article className="task-row" key={task.id}>
                   <button
                     className={`completion-button ${taskDone(task) ? "checked" : ""}`}
                     aria-label={`${taskDone(task) ? "Reopen" : "Complete"} ${task.title}${task.repeat_weekdays?.length ? " for today" : ""}`}
-                    disabled={busy || task.is_archived}
+                    disabled={busy || pendingRows.has(task.id) || task.is_archived}
                     onClick={() => toggleTask(task)}
                   >
-                    <CircleCheck />
+                    {taskDone(task) ? <CircleCheck /> : <Circle />}
                   </button>
                   <div className="grow">
                     <button className={`task-title ${taskDone(task) ? "done" : ""}`} onClick={() => openTask(task)}>
                       {task.title}
                     </button>
                     <div className="task-meta">
-                      <span className={`priority ${task.priority}`}>{task.priority}</span>
-                      <span>{task.status.replace("_", " ")}</span>
+                      {task.priority === "high" && <span className={`priority ${task.priority}`}>{task.priority} priority</span>}
+                      {task.status !== "pending" && <span>{task.status.replace("_", " ")}</span>}
                       {task.category && <span>{task.category}</span>}
                       {task.estimated_duration != null && (
                         <span>
-                          {task.actual_duration || 0}/{task.estimated_duration} min
+                          Time tracked: {task.actual_duration || 0} of {task.estimated_duration} min
                         </span>
-                      )}
-                      {task.estimated_duration != null && (
-                        <span>{task.progress_percent ?? Math.min(100, Math.round(((task.actual_duration || 0) / task.estimated_duration) * 100))}% done</span>
                       )}
                       {task.deadline && (
                         <span className={new Date(task.deadline) < new Date() && !taskDone(task) ? "danger" : ""}>
-                          Due {new Date(task.deadline).toLocaleDateString()}
+                          {new Date(task.deadline).getTime() < clock && !taskDone(task) ? "Overdue · " : "Due "}{new Date(task.deadline).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}
                         </span>
                       )}
                       {!!task.repeat_weekdays?.length && <span>Repeats · completion is for today</span>}
@@ -1451,24 +1461,14 @@ export default function Planner({ user, onLogout }: { user: { id: string; name: 
                         </span>
                       )}
                     </div>
+                  {pendingRows.has(task.id) && <p role="status">Saving…</p>}{rowErrors[task.id] && <p className="error" role="alert">{rowErrors[task.id]}<button onClick={() => setRowErrors(previous => ({ ...previous, [task.id]: "" }))}>Dismiss</button></p>}
                   </div>
                   <div className="task-actions">
-                    {!task.is_archived && task.status === "pending" && (
-                      <button
-                        disabled={busy}
-                        aria-label={`Start task ${task.title}`}
-                        onClick={() =>
-                          void act(async () => {
-                            await api(`/tasks/${task.id}/start`, request("POST"));
-                          })
-                        }
-                      >
-                        Start
-                      </button>
-                    )}
+                    {!task.is_archived && !taskDone(task) && <button disabled={busy || pendingRows.has(task.id) || !!run || !timerReady} aria-label={`Focus on ${task.title}`} onClick={() => startFocus(task.id)}><Play />Start focus</button>}
+                    <details className="task-menu"><summary aria-label={`More actions for ${task.title}`}>More</summary><div className="stack compact">
                     {!task.is_archived && task.status !== "completed" && (
                       <button
-                        disabled={busy}
+                        disabled={busy || pendingRows.has(task.id)}
                         aria-label={`Reschedule ${task.title}`}
                         onClick={() => {
                           setError("");
@@ -1480,45 +1480,37 @@ export default function Planner({ user, onLogout }: { user: { id: string; name: 
                       </button>
                     )}
                     <button className="icon-button" aria-label={`Edit ${task.title}`} onClick={() => openTask(task)}>
-                      <Pencil />
+                      <Pencil /> Edit
                     </button>
-                    {!task.is_archived && (
-                      <button
-                        className="icon-button"
-                        disabled={!!run || !timerReady || task.status === "completed"}
-                        aria-label={`Focus on ${task.title}`}
-                        onClick={() => startFocus(task.id)}
-                      >
-                        <Play />
-                      </button>
-                    )}
                     <button
                       className="icon-button"
-                      disabled={busy}
+                      disabled={busy || pendingRows.has(task.id)}
                       aria-label={`${task.is_archived ? "Restore" : "Archive"} ${task.title}`}
                       onClick={() =>
                         void act(async () => {
                           await api(`/tasks/${task.id}/${task.is_archived ? "restore" : "archive"}`, request("POST"));
-                        })
+                          setNotice({ text: task.is_archived ? "Task restored" : "Task archived", undo: async () => { await api(`/tasks/${task.id}/${task.is_archived ? "archive" : "restore"}`, request("POST")); refresh(); } });
+                        }, false, task.id)
                       }
                     >
-                      {task.is_archived ? <RotateCcw /> : <Archive />}
+                      {task.is_archived ? <RotateCcw /> : <Archive />}{task.is_archived ? "Restore" : "Archive"}
                     </button>
                     <button
                       className="icon-button danger"
-                      disabled={busy}
+                      disabled={busy || pendingRows.has(task.id)}
                       aria-label={`Delete ${task.title}`}
-                      onClick={() => {
-                        if (window.confirm(`Permanently delete "${task.title}"?`))
+                      onClick={async () => {
+                        if (await confirmAction(`Permanently delete "${task.title}"?`))
                           void act(async () => {
                             await api(`/tasks/${task.id}`, request("DELETE"));
-                          });
+                          }, false, task.id);
                       }}
                     >
-                      <Trash2 />
+                      <Trash2 /> Delete
                     </button>
+                    </div></details>
                   </div>
-                </article>
+                </article></Fragment>
               ))}
             </section>
           </div>
@@ -1586,7 +1578,7 @@ export default function Planner({ user, onLogout }: { user: { id: string; name: 
                       <button
                         disabled={busy}
                         aria-label={`Edit habit ${h.title}`}
-                        onClick={() => {
+                        onClick={async () => {
                           setError("");
                           setEditingHabit(h);
                           setSheet("habit");
@@ -1627,8 +1619,8 @@ export default function Planner({ user, onLogout }: { user: { id: string; name: 
                       <button
                         disabled={busy || count === 0}
                         aria-label={`Reset habit ${h.title} today`}
-                        onClick={() => {
-                          if (window.confirm(`Reset today's count for ${h.title}?`))
+                        onClick={async () => {
+                          if (await confirmAction(`Reset today's count for ${h.title}?`))
                             void act(async () => {
                               await api(`/habits/${h.id}/logs/day?timezone=${encodeURIComponent(timezone())}`, request("PUT", { date: today, count: 0 }));
                             });
@@ -1663,8 +1655,8 @@ export default function Planner({ user, onLogout }: { user: { id: string; name: 
                         className="icon-button danger"
                         disabled={busy}
                         aria-label={`Delete habit ${h.title}`}
-                        onClick={() => {
-                          if (window.confirm(`Delete habit "${h.title}" and its history?`))
+                        onClick={async () => {
+                          if (await confirmAction(`Delete habit "${h.title}" and its history?`))
                             void act(async () => {
                               await api(`/habits/${h.id}`, request("DELETE"));
                             });
@@ -1736,6 +1728,7 @@ export default function Planner({ user, onLogout }: { user: { id: string; name: 
                     Started {new Date(run.started).toLocaleString()}
                     {run.category ? ` · ${run.category}` : ""}
                   </p>
+                  {!run.ended && <button disabled={busy || !timerReady} onClick={pauseFocus}>{run.pausedAt ? "Resume" : "Pause"}</button>}
                   <button
                     className="primary"
                     disabled={busy || !timerReady || (!run.operationId && (run.ended !== undefined || !!run.uncertain || !!run.sessionId))}
@@ -1890,8 +1883,8 @@ export default function Planner({ user, onLogout }: { user: { id: string; name: 
                         disabled={busy}
                         aria-label={`Delete focus session ${s.id}`}
                         className="danger"
-                        onClick={() => {
-                          if (window.confirm("Delete this focus session? Task actual minutes will not change. Adjust the task separately if needed."))
+                        onClick={async () => {
+                          if (await confirmAction("Delete this focus session? Task actual minutes will not change. Adjust the task separately if needed."))
                             void act(async () => {
                               await api(`/focus/sessions/${s.id}`, request("DELETE"));
                             });
@@ -2252,8 +2245,8 @@ export default function Planner({ user, onLogout }: { user: { id: string; name: 
                   <button
                     disabled={!localCategories}
                     aria-label={`Remove category suggestion ${category}`}
-                    onClick={() => {
-                      if (window.confirm(`Remove "${category}" from suggestions? Existing labels will stay unchanged.`)) changeCategory(category, true);
+                    onClick={async () => {
+                      if (await confirmAction(`Remove "${category}" from suggestions? Existing labels will stay unchanged.`)) changeCategory(category, true);
                     }}
                   >
                     Remove
@@ -2291,7 +2284,7 @@ export default function Planner({ user, onLogout }: { user: { id: string; name: 
               disabled={busy}
               onClick={() =>
                 void act(async () => {
-                  if (run && !window.confirm("A focus session exists. Check any pending save against history and task time before leaving. Sign out?")) return;
+                  if (run && !await confirmAction("A focus session exists. Check any pending save against history and task time before leaving. Sign out?")) return;
                   await onLogout();
                 })
               }

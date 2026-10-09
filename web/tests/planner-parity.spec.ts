@@ -116,7 +116,7 @@ test("persisted proposals resume, redo, accept individually/all, generate and re
     }
     return route.fulfill({ json: path.endsWith("/accept") ? { recommendation: plan, blocks: [] } : plan });
   });
-  await page.goto("/");
+  await page.goto("/"); await page.getByRole("navigation").getByRole("button", { name: "Schedule", exact: true }).click();
   await expect(
     page.getByText(
       "Plans begin today and cover at least the next week, extending to task deadlines. Dates select your calendar view, not the schedule horizon.",
@@ -129,7 +129,7 @@ test("persisted proposals resume, redo, accept individually/all, generate and re
   await expect(page.getByText("Revised slot")).toBeVisible();
   await page.getByRole("button", { name: "Accept Write report", exact: true }).click();
   await expect(page.getByRole("button", { name: "Accept Write report", exact: true })).toBeDisabled();
-  await page.reload();
+  await page.reload(); await page.getByRole("navigation").getByRole("button", { name: "Schedule", exact: true }).click();
   await expect(page.getByText("Accepted", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Accept all", exact: true }).click();
   await expect(page.getByText("No pending proposals.", { exact: false })).toBeVisible();
@@ -153,7 +153,7 @@ test("proposal errors preserve review and reload checks uncertain outcomes", asy
   await mock(page);
   await page.route("**/api/backend/schedule/recommendations?*", (route) => route.fulfill({ json: { items: [proposal()] } }));
   await page.route("**/api/backend/schedule/recommendations/plan-1/accept", (route) => route.fulfill({ status: 409, json: { detail: "Slot conflict" } }));
-  await page.goto("/");
+  await page.goto("/"); await page.getByRole("navigation").getByRole("button", { name: "Schedule", exact: true }).click();
   await page.getByRole("button", { name: "Accept all", exact: true }).click();
   await expect(page.getByRole("region", { name: "Schedule proposals" }).getByRole("alert")).toContainText("Slot conflict");
   await expect(page.getByText("Protect your morning")).toBeVisible();
@@ -174,7 +174,7 @@ test("failed generation shows server retry information without acceptance", asyn
       },
     }),
   );
-  await page.goto("/");
+  await page.goto("/"); await page.getByRole("navigation").getByRole("button", { name: "Schedule", exact: true }).click();
   await page.getByRole("button", { name: "Generate schedule proposal" }).click();
   await expect(page.getByText(/Provider unavailable/)).toBeVisible();
   await expect(page.getByText(/Try again after/)).toBeVisible();
@@ -190,7 +190,7 @@ for (const operation of ["items/0/accept", "items/0/redo", "reject"]) {
     await page.route(`**/api/backend/schedule/recommendations/plan-1/${operation}`, (route) =>
       route.fulfill({ status: 409, json: { detail: "Proposal changed" } }),
     );
-    await page.goto("/");
+    await page.goto("/"); await page.getByRole("navigation").getByRole("button", { name: "Schedule", exact: true }).click();
     const name = operation === "reject" ? "Reject proposal" : operation.endsWith("redo") ? "Redo Write report" : "Accept Write report";
     await page.getByRole("button", { name, exact: true }).click();
     const region = page.getByRole("region", { name: "Schedule proposals" });
@@ -227,7 +227,7 @@ test("daily advice ignores a stale response after changing date and returning", 
       },
     });
   });
-  await page.goto("/");
+  await page.goto("/"); await page.getByRole("navigation").getByRole("button", { name: "Schedule", exact: true }).click();
   await page.getByRole("button", { name: "Generate", exact: true }).click();
   await requested;
   const calendar = page.getByRole("region", { name: "Month calendar" });
@@ -242,19 +242,21 @@ test("daily advice ignores a stale response after changing date and returning", 
 
 test("task defaults, description search, explicit status transitions and actual time", async ({ page }) => {
   const writes = await mock(page);
-  await page.goto("/");
+  await page.goto("/"); await page.getByRole("navigation").getByRole("button", { name: "Schedule", exact: true }).click();
   await navigate(page, "Tasks");
   await page.getByRole("button", { name: "New task", exact: true }).click();
   const create = page.getByRole("dialog", { name: "New task", exact: true });
+  await create.getByText("More options", { exact: true }).click();
   await expect(create.getByRole("combobox", { name: "Priority", exact: true })).toHaveValue("high");
   await expect(create.getByLabel("Estimated minutes")).toHaveValue("45");
   await create.getByLabel("Title", { exact: true }).fill("New work");
-  await create.getByRole("combobox", { name: "Status", exact: true }).selectOption("in_progress");
+  await expect(create.getByRole("combobox", { name: "Status", exact: true })).toHaveCount(0);
   await create.getByRole("button", { name: "Create task", exact: true }).click();
   await expect(create).toHaveCount(0);
-  await expect.poll(() => writes.some((w) => w.path === "/tasks/new-task/start")).toBe(true);
+  expect(writes.some((w) => w.path === "/tasks/new-task/start")).toBe(false);
   await page.getByRole("searchbox", { name: "Search tasks" }).fill("Research findings");
   await expect(page.getByRole("button", { name: "Write report", exact: true })).toBeVisible();
+  if (await page.getByLabel("More actions for Write report", { exact: true }).locator("..").getAttribute("open") === null) await page.getByLabel("More actions for Write report", { exact: true }).click();
   await page.getByRole("button", { name: "Edit Write report", exact: true }).click();
   const edit = page.getByRole("dialog", { name: "Edit task", exact: true });
   await edit.getByLabel("Actual minutes").fill("35");
@@ -263,9 +265,9 @@ test("task defaults, description search, explicit status transitions and actual 
   await expect(edit).toHaveCount(0);
   expect(writes.find((w) => w.path === "/tasks/task-1" && w.method === "PATCH")?.body).toMatchObject({ actual_duration: 35 });
   expect(writes.some((w) => w.path === "/tasks/task-1/complete")).toBe(true);
-  await page.getByRole("button", { name: "Start task Write report" }).click();
+  await page.getByRole("button", { name: "Focus on Write report" }).click();
   await expect.poll(() => writes.some((w) => w.path === "/tasks/task-1/start")).toBe(true);
-  await expect(page.getByRole("button", { name: "Start task Write report" })).toBeEnabled();
+  await expect(page.getByRole("heading", { name: "Focus", exact: true })).toBeVisible();
 });
 
 test("task sort fields and both directions reach the backend", async ({ page }) => {
@@ -274,7 +276,7 @@ test("task sort fields and both directions reach the backend", async ({ page }) 
   page.on("request", (request) => {
     if (request.url().includes("/api/backend/tasks?")) queries.push(request.url());
   });
-  await page.goto("/");
+  await page.goto("/"); await page.getByRole("navigation").getByRole("button", { name: "Schedule", exact: true }).click();
   await navigate(page, "Tasks");
   await page.getByRole("combobox", { name: "Sort tasks", exact: true }).selectOption("updated_at");
   await expect.poll(() => queries.some((q) => q.includes("sort=updated_at&order=desc"))).toBe(true);
@@ -286,8 +288,9 @@ test("task sort fields and both directions reach the backend", async ({ page }) 
 test("task edit errors keep unsaved actual minutes and description", async ({ page }) => {
   await mock(page);
   await page.route("**/api/backend/tasks/task-1", (route) => route.fulfill({ status: 422, json: { detail: "Cannot update task" } }));
-  await page.goto("/");
+  await page.goto("/"); await page.getByRole("navigation").getByRole("button", { name: "Schedule", exact: true }).click();
   await navigate(page, "Tasks");
+  if (await page.getByLabel("More actions for Write report", { exact: true }).locator("..").getAttribute("open") === null) await page.getByLabel("More actions for Write report", { exact: true }).click();
   await page.getByRole("button", { name: "Edit Write report", exact: true }).click();
   const dialog = page.getByRole("dialog", { name: "Edit task", exact: true });
   await dialog.getByLabel("Actual minutes").fill("23");
@@ -307,7 +310,7 @@ test("manual blocks create/edit and repeat occurrence scopes use exact contracts
       ? route.fulfill({ json: { items: [{ id: "block-1", task_id: "task-1", title: "Report time", start_at: at(9), end_at: at(10), completed_at: null }] } })
       : route.fallback(),
   );
-  await page.goto("/");
+  await page.goto("/"); await page.getByRole("navigation").getByRole("button", { name: "Schedule", exact: true }).click();
   await page.getByRole("button", { name: "Add block", exact: true }).click();
   const add = page.getByRole("dialog", { name: "Schedule a task" });
   await add.getByRole("combobox", { name: "Task", exact: true }).selectOption("task-1");
@@ -342,8 +345,9 @@ test("reschedule/snooze preserve errors and send remaining work, reason, timezon
   await page.route("**/api/backend/tasks/task-1/reschedule", (route) =>
     fail ? route.fulfill({ status: 409, json: { detail: "No available time" } }) : route.fallback(),
   );
-  await page.goto("/");
+  await page.goto("/"); await page.getByRole("navigation").getByRole("button", { name: "Schedule", exact: true }).click();
   await navigate(page, "Tasks");
+  if (await page.getByLabel("More actions for Write report", { exact: true }).locator("..").getAttribute("open") === null) await page.getByLabel("More actions for Write report", { exact: true }).click();
   await page.getByRole("button", { name: "Reschedule Write report" }).click();
   const dialog = page.getByRole("dialog", { name: "Reschedule task" });
   await dialog.getByLabel("Remaining minutes").fill("25");
@@ -359,6 +363,7 @@ test("reschedule/snooze preserve errors and send remaining work, reason, timezon
     reason: "Need more time",
     timezone: expect.any(String),
   });
+  if (await page.getByLabel("More actions for Write report", { exact: true }).locator("..").getAttribute("open") === null) await page.getByLabel("More actions for Write report", { exact: true }).click();
   await page.getByRole("button", { name: "Reschedule Write report" }).click();
   await dialog.getByLabel("Snooze minutes").fill("30");
   await dialog.getByRole("button", { name: "Snooze task", exact: true }).click();
@@ -376,7 +381,7 @@ test("block and occurrence server errors keep edited times and scope", async ({ 
   );
   await page.route("**/api/backend/calendar/blocks/block-1", (route) => route.fulfill({ status: 409, json: { detail: "Block conflict" } }));
   await page.route("**/api/backend/tasks/repeat-1/occurrence", (route) => route.fulfill({ status: 409, json: { detail: "Occurrence conflict" } }));
-  await page.goto("/");
+  await page.goto("/"); await page.getByRole("navigation").getByRole("button", { name: "Schedule", exact: true }).click();
   await page.getByRole("button", { name: "Edit block Report time" }).click();
   const block = page.getByRole("dialog", { name: "Edit schedule block" });
   await block.getByLabel("Block title").fill("Keep block title");
@@ -416,12 +421,12 @@ test("block completion, reopening and deletion use explicit routes", async ({ pa
     deleted = true;
     return route.fallback();
   });
-  await page.goto("/");
+  await page.goto("/"); await page.getByRole("navigation").getByRole("button", { name: "Schedule", exact: true }).click();
   await page.getByRole("button", { name: `Complete Report time on ${day}`, exact: true }).click();
   await page.getByRole("button", { name: `Reopen Report time on ${day}`, exact: true }).click();
   await expect(page.getByRole("button", { name: `Complete Report time on ${day}`, exact: true })).toBeVisible();
-  page.once("dialog", (d) => d.accept());
   await page.getByRole("button", { name: "Delete block Report time" }).click();
+  await page.getByRole("dialog", { name: "Confirm action" }).getByRole("button", { name: "Confirm", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Report time", exact: true })).toHaveCount(0);
   expect(writes.map((w) => w.path)).toEqual(["/calendar/blocks/block-1/complete", "/calendar/blocks/block-1/reopen", "/calendar/blocks/block-1"]);
 });
@@ -447,7 +452,7 @@ test("moved repeat overrides and overnight spillovers retain original occurrence
       },
     }),
   );
-  await page.goto("/");
+  await page.goto("/"); await page.getByRole("navigation").getByRole("button", { name: "Schedule", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Moved reading", exact: true })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Night shift", exact: true })).toBeVisible();
   await page.getByRole("button", { name: `Complete Moved reading on ${source}`, exact: true }).click();
@@ -474,7 +479,7 @@ test("habit edit, reorder, complete, reset and manual count", async ({ page }) =
     last_7_days: [{ date: day, scheduled: true, completed_count: 1 }],
   }));
   await page.route("**/api/backend/habits/dashboard?*", (route) => route.fulfill({ json: { habits } }));
-  await page.goto("/");
+  await page.goto("/"); await page.getByRole("navigation").getByRole("button", { name: "Schedule", exact: true }).click();
   await navigate(page, "Habits");
   await page.getByRole("button", { name: "Edit habit Read" }).click();
   const dialog = page.getByRole("dialog", { name: "Edit habit" });
@@ -491,8 +496,8 @@ test("habit edit, reorder, complete, reset and manual count", async ({ page }) =
   await page.getByRole("button", { name: "Complete habit Read today" }).click();
   await expect.poll(() => writes.some((w) => w.body?.count === 3)).toBe(true);
   await expect(page.getByRole("button", { name: "Complete habit Read today" })).toBeEnabled();
-  page.once("dialog", (d) => d.accept());
   await page.getByRole("button", { name: "Reset habit Read today" }).click();
+  await page.getByRole("dialog", { name: "Confirm action" }).getByRole("button", { name: "Confirm", exact: true }).click();
   await expect.poll(() => writes.some((w) => w.body?.count === 0)).toBe(true);
   await expect(page.getByRole("button", { name: "Reset habit Read today" })).toBeEnabled();
   await expect(page.getByRole("button", { name: "Refresh habits", exact: true })).toBeEnabled();
@@ -520,7 +525,7 @@ test("focus edit/delete, category analytics never rewrite task actual time", asy
     if (route.request().method() === "DELETE") sessions = sessions.filter((s) => s.id !== "session-1");
     return route.fallback();
   });
-  await page.goto("/");
+  await page.goto("/"); await page.getByRole("navigation").getByRole("button", { name: "Schedule", exact: true }).click();
   await navigate(page, "Focus");
   await page.getByLabel("Focus category").selectOption("Work");
   await expect(page.getByRole("button", { name: "Edit focus session session-2" })).toHaveCount(0);
@@ -536,8 +541,8 @@ test("focus edit/delete, category analytics never rewrite task actual time", asy
   await dialog.getByRole("button", { name: "Save session" }).click();
   await expect(dialog).toHaveCount(0);
   expect(writes.find((w) => w.path === "/focus/sessions/session-1")?.body).toMatchObject({ started_at: at(9), ended_at: expect.any(String) });
-  page.once("dialog", (d) => d.accept());
   await page.getByRole("button", { name: "Delete focus session session-1" }).click();
+  await page.getByRole("dialog", { name: "Confirm action" }).getByRole("button", { name: "Confirm", exact: true }).click();
   await expect(page.getByRole("button", { name: "Edit focus session session-1" })).toHaveCount(0);
   expect(writes.some((w) => w.path.startsWith("/tasks/"))).toBe(false);
   await expect(page.getByText("Do not show insight")).toHaveCount(0);
@@ -558,7 +563,7 @@ test("habit edit and reorder failures preserve form and existing order", async (
   await page.route("**/api/backend/habits/dashboard?*", (route) => route.fulfill({ json: { habits } }));
   await page.route("**/api/backend/habits/habit-0", (route) => route.fulfill({ status: 422, json: { detail: "Habit could not be saved" } }));
   await page.route("**/api/backend/habits/reorder", (route) => route.fulfill({ status: 409, json: { detail: "Order could not be saved" } }));
-  await page.goto("/");
+  await page.goto("/"); await page.getByRole("navigation").getByRole("button", { name: "Schedule", exact: true }).click();
   await navigate(page, "Habits");
   await page.getByRole("button", { name: "Edit habit Read" }).click();
   const dialog = page.getByRole("dialog", { name: "Edit habit" });
@@ -578,7 +583,7 @@ test("notification preferences preserve failed edits, save all fields and expose
   await page.route("**/api/backend/notifications/preferences", (route) =>
     route.request().method() === "PATCH" && fail ? route.fulfill({ status: 422, json: { detail: "Unable to update reminders" } }) : route.fallback(),
   );
-  await page.goto("/");
+  await page.goto("/"); await page.getByRole("navigation").getByRole("button", { name: "Schedule", exact: true }).click();
   await page.getByRole("button", { name: "Open settings" }).click();
   const dialog = page.getByRole("dialog", { name: "Settings", exact: true });
   await dialog.getByLabel("Morning briefing", { exact: true }).uncheck();
@@ -610,20 +615,20 @@ test("independent category suggestions persist per account, remove labels only f
   const writes = await mock(page);
   let account = { id: "11111111-1111-4111-8111-111111111111", name: "Test User", email: "test@example.com" };
   await page.route("**/api/session", (route) => route.fulfill({ json: account }));
-  await page.goto("/");
+  await page.goto("/"); await page.getByRole("navigation").getByRole("button", { name: "Schedule", exact: true }).click();
   await page.getByRole("button", { name: "Open settings" }).click();
   const dialog = page.getByRole("dialog", { name: "Settings", exact: true });
   await dialog.getByLabel("New category", { exact: true }).fill("  Study  ");
   await dialog.getByRole("button", { name: "Add category suggestion" }).click();
   await expect(dialog.getByRole("button", { name: "Remove category suggestion Study" })).toBeVisible();
-  page.once("dialog", (d) => d.accept());
   await dialog.getByRole("button", { name: "Remove category suggestion Work" }).click();
+  await page.getByRole("dialog", { name: "Confirm action" }).getByRole("button", { name: "Confirm", exact: true }).click();
   await expect(page.locator("#planner-categories option")).toHaveAttribute("value", "Study");
   await dialog.getByRole("button", { name: "Close Settings" }).click();
   await navigate(page, "Tasks");
   await expect(page.locator(".task-meta").getByText("Work", { exact: true })).toBeVisible();
   account = { ...account, email: "renamed@example.com" };
-  await page.reload();
+  await page.reload(); await page.getByRole("navigation").getByRole("button", { name: "Schedule", exact: true }).click();
   await page.getByRole("button", { name: "Open settings" }).click();
   await expect(dialog.getByRole("button", { name: "Remove category suggestion Study" })).toBeVisible();
   await expect(dialog.getByRole("button", { name: "Remove category suggestion Work" })).toHaveCount(0);
@@ -631,7 +636,7 @@ test("independent category suggestions persist per account, remove labels only f
   await dialog.getByRole("button", { name: "Add category suggestion" }).click();
   await expect(dialog.getByRole("button", { name: "Remove category suggestion Work" })).toBeVisible();
   account = { ...account, id: "33333333-3333-4333-8333-333333333333" };
-  await page.reload();
+  await page.reload(); await page.getByRole("navigation").getByRole("button", { name: "Schedule", exact: true }).click();
   await page.getByRole("button", { name: "Open settings" }).click();
   await expect(dialog.getByRole("button", { name: "Remove category suggestion Study" })).toHaveCount(0);
   await expect(dialog.getByRole("button", { name: "Remove category suggestion Work" })).toBeVisible();
@@ -647,7 +652,7 @@ test("category storage failures preserve input and do not claim a saved suggesti
       original.call(this, key, value);
     };
   });
-  await page.goto("/");
+  await page.goto("/"); await page.getByRole("navigation").getByRole("button", { name: "Schedule", exact: true }).click();
   await page.getByRole("button", { name: "Open settings" }).click();
   const dialog = page.getByRole("dialog", { name: "Settings", exact: true });
   await dialog.getByLabel("New category", { exact: true }).fill("Keep my category");
@@ -684,7 +689,7 @@ test("offline task-change events reload tasks, ignore superseded reads, and do n
     }
     await route.fulfill({ json: { items: [snapshot] } });
   });
-  await page.goto("/");
+  await page.goto("/"); await page.getByRole("navigation").getByRole("button", { name: "Schedule", exact: true }).click();
   const initialTasksLoad = page.waitForResponse(response => new URL(response.url()).searchParams.get("archived") === "true");
   await navigate(page, "Tasks");
   await initialTasksLoad;
@@ -706,7 +711,7 @@ test("offline task-change events reload tasks, ignore superseded reads, and do n
 
 test("scheduling preferences accept 24-hour boundaries but reject reversed hours and values above 24", async ({ page }) => {
   const writes = await mock(page);
-  await page.goto("/");
+  await page.goto("/"); await page.getByRole("navigation").getByRole("button", { name: "Schedule", exact: true }).click();
   await page.getByRole("button", { name: "Open settings" }).click();
   const dialog = page.getByRole("dialog", { name: "Settings", exact: true });
   const start = dialog.getByLabel("Work starts (hour)", { exact: true });

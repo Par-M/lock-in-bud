@@ -29,7 +29,7 @@ nonisolated public struct FocusActivityAttributes: ActivityAttributes, Sendable 
 public enum FocusLiveActivityManager {
     public static func startLiveActivity() {
         guard ActivityAuthorizationInfo().areActivitiesEnabled else { return }
-        let attributes = FocusActivityAttributes(taskTitle: "Deep Work Session", startedAt: Date())
+        let attributes = FocusActivityAttributes(taskTitle: FocusTimerStarter.activeTaskTitle ?? "Focus session", startedAt: Date().addingTimeInterval(-Double(FocusTimerStarter.elapsedSeconds())))
         let state = FocusActivityAttributes.ContentState(elapsedSeconds: 0, isPaused: false)
         do {
             if #available(iOS 16.2, *) {

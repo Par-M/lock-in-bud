@@ -3,6 +3,8 @@ import WidgetKit
 
 @MainActor
 enum FocusTimerStarter {
+    static let pausedAtKey = "focusTimerPausedAt"
+    static let pausedSecondsKey = "focusTimerPausedSeconds"
     static let startedAtKey = "focusTimerStartedAt"
     static let activeTaskIDKey = "focusActiveTaskID"
     static let activeTaskTitleKey = "focusActiveTaskTitle"
@@ -13,6 +15,8 @@ enum FocusTimerStarter {
         let owner = userID?.uuidString
         let defaults = UserDefaults.standard
         guard defaults.string(forKey: ownerKey) != owner || (userID == nil && startedAt > 0) else { return }
+        defaults.removeObject(forKey: pausedAtKey)
+        defaults.removeObject(forKey: pausedSecondsKey)
         defaults.removeObject(forKey: startedAtKey)
         clearActiveTask()
         defaults.set(owner, forKey: ownerKey)
@@ -57,6 +61,8 @@ enum FocusTimerStarter {
         let defaults = UserDefaults.standard
         let startedAt = Date().timeIntervalSince1970
 
+        defaults.removeObject(forKey: pausedAtKey)
+        defaults.removeObject(forKey: pausedSecondsKey)
         defaults.set(startedAt, forKey: startedAtKey)
 
         if let taskID {
@@ -82,6 +88,34 @@ enum FocusTimerStarter {
 
         if #available(iOS 16.1, *) {
             FocusLiveActivityManager.startLiveActivity()
+        }
+    }
+
+    static var isPaused: Bool { UserDefaults.standard.double(forKey: pausedAtKey) > 0 }
+    static func elapsedSeconds(at now: TimeInterval = Date().timeIntervalSince1970) -> Int {
+        guard startedAt > 0 else { return 0 }
+        let paused = UserDefaults.standard.double(forKey: pausedAtKey)
+        let total = UserDefaults.standard.double(forKey: pausedSecondsKey)
+        return max(0, Int((paused > 0 ? paused : now) - startedAt - total))
+    }
+    static func togglePause() {
+        guard startedAt > 0 else { return }
+        let defaults = UserDefaults.standard
+        let now = Date().timeIntervalSince1970
+        let paused = defaults.double(forKey: pausedAtKey)
+        if paused > 0 {
+            defaults.set(defaults.double(forKey: pausedSecondsKey) + now - paused, forKey: pausedSecondsKey)
+            defaults.removeObject(forKey: pausedAtKey)
+        } else { defaults.set(now, forKey: pausedAtKey) }
+        WidgetDataStore.writeFocus(startedAt: isPaused ? 0 : now - Double(elapsedSeconds()), title: isPaused ? "Paused · " + (activeTaskTitle ?? "Focus session") : activeTaskTitle ?? "Focus session")
+        WidgetCenter.shared.reloadTimelines(ofKind: "FocusTimerWidget")
+        if #available(iOS 16.1, *) {
+            let elapsed = elapsedSeconds()
+            let pausedNow = isPaused
+            Task {
+                await FocusLiveActivityManager.endLiveActivity(elapsedSeconds: elapsed)
+                if !pausedNow { FocusLiveActivityManager.startLiveActivity() }
+            }
         }
     }
 

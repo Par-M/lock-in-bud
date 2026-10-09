@@ -118,6 +118,7 @@ export function ScheduleProposals({ date, onChanged, availability }: { date: str
             <p key={i}>{warning}</p>
           ))}
           {!!p.meta?.deferred_tasks?.length && <p>Deferred: {p.meta.deferred_tasks.join(", ")}</p>}
+          <p className="proposal-summary">Adds {p.items.filter(i => !i.accepted).length} proposed time blocks. Fixed events keep their times. Review placements below; applying does not complete tasks.</p>
           {p.items.map((item, index) => (
             <div className="recommendation" key={`${item.task_id}-${index}`}>
               <div className="grow">

@@ -1,7 +1,7 @@
 import SwiftUI
 
 /// A 15-minute-step slider showing how much of a task's estimated duration has
-/// been completed. "Amount left" = estimated minus completed.
+/// been tracked. Logged time and explicit task completion are independent.
 ///
 /// Changes are committed to the parent (persisted) when the user finishes
 /// dragging so we don't send a network request on every 15-minute step.
@@ -16,20 +16,21 @@ struct CompletenessSlider: View {
     }
 
     private var maxValue: Double {
-        Double(max(15, estimatedMinutes))
+        Double(max(15, estimatedMinutes, completedMinutes))
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
-                Text("\(formatMinutes(completedMinutes)) done")
+                Text("\(formatMinutes(completedMinutes)) tracked")
                     .font(.subheadline.weight(.medium))
                 Spacer()
-                Text("\(formatMinutes(amountLeft)) left")
+                Text("\(formatMinutes(estimatedMinutes)) estimated")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
             }
 
+            Text("Time tracked does not mark this task complete.").font(.caption).foregroundStyle(.secondary)
             Slider(
                 value: Binding(
                     get: { Double(completedMinutes) },
@@ -44,6 +45,7 @@ struct CompletenessSlider: View {
                 }
             )
 
+            .accessibilityLabel("Time tracked in minutes")
             HStack {
                 Text("0")
                 Spacer()

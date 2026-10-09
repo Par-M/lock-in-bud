@@ -44,7 +44,7 @@ test("explicit Google consent imports paginated busy times into identical daily/
       items: [{ ...event, transparency: "transparent" }, { ...event, status: "cancelled" }, { start: { date: "2026-10-05" }, end: { date: "2026-10-06" } }], nextPageToken: "events-next",
     } });
   });
-  await page.goto("/");
+  await page.goto("/"); await page.getByRole("navigation").getByRole("button", { name: "Schedule", exact: true }).click();
   await expect(page.getByRole("button", { name: "Connect Google Calendar" })).toBeEnabled();
   expect(queries).toHaveLength(0);
   await page.getByRole("button", { name: "Connect Google Calendar" }).click();
@@ -85,7 +85,7 @@ test("failed reload retains prior intervals, blocks planning, and recovers on ex
     if (route.request().url().includes("calendarList")) return route.fulfill({ json: { items: [{ id: "primary", summary: "Main calendar" }] } });
     return fail ? route.fulfill({ status: 403, json: { error: { message: "API disabled" } } }) : route.fulfill({ json: { items: [{ start: { dateTime: busy.start }, end: { dateTime: busy.end } }] } });
   });
-  await page.goto("/");
+  await page.goto("/"); await page.getByRole("navigation").getByRole("button", { name: "Schedule", exact: true }).click();
   await page.getByRole("button", { name: "Connect Google Calendar" }).click();
   await expect(page.getByText("1 busy intervals.", { exact: false })).toBeVisible();
   fail = true;

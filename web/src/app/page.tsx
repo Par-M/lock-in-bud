@@ -1,5 +1,6 @@
 "use client";
 
+import { Sheet } from "@/components/sheet";
 import { useEffect, useRef, useState } from "react";
 import Script from "next/script";
 import Planner from "@/components/planner";
@@ -31,6 +32,7 @@ export default function Home() {
   const [offline, setOffline] = useState<OfflineStatus>({ online: true, available: false, pending: 0, conflicts: [], error: "" });
   const [syncing, setSyncing] = useState(false);
   const sessionSequence = useRef(0);
+  const [discardConflict, setDiscardConflict] = useState<{ id: string; title: string } | null>(null);
   const clientId = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID;
 
   async function acceptUser(value: User, sequence: number) {
@@ -38,6 +40,7 @@ export default function Home() {
     try { await initializeOfflineAccount(value); }
     catch (e) { setOffline(status => ({ ...status, error: (e as Error).message })); }
     if (sequence !== sessionSequence.current) return false;
+    setError("");
     setUser(value);
     return true;
   }
@@ -123,8 +126,8 @@ export default function Home() {
   }, [googleReady, loading, user, clientId]);
 
   if (user) return <>
-    <section aria-label="Task sync status" style={{ padding: "8px 16px", overflowWrap: "anywhere" }}>
-      <p role="status" aria-live="polite">{offline.online ? "Online" : "Offline"}. {offline.pending ? `${offline.pending} task change${offline.pending === 1 ? "" : "s"} saved on this device, not confirmed on the server.` : "No pending task changes."}
+    <section className="sync-status" aria-label="Task sync status">
+      <p role="status" aria-live="polite">{syncing ? "Syncing…" : offline.error ? "Couldn’t sync." : offline.pending ? "Saved on device." : offline.online ? offline.available ? "Synced." : "Online · sync unavailable." : "Offline."} {offline.pending ? `${offline.pending} task change${offline.pending === 1 ? "" : "s"} saved on this device, not confirmed on the server.` : "No pending task changes."}
         {!offline.online && (offline.available ? " Cached tasks and task details can be created, edited and deleted. Status and other online actions are not queued." : " Offline tasks are not ready for this account. Connect to download tasks and enable safe offline writes.")}</p>
       {error && <p role="alert">{error}</p>}
       {offline.error && <p role="alert">{offline.error}</p>}
@@ -132,13 +135,10 @@ export default function Home() {
       {offline.conflicts.map(conflict => <div key={conflict.id} role="alert">
         <p>Task sync needs review: {conflict.title}. {conflict.detail} Local changes are retained and will not overwrite the server.</p>
         <p>After discarding local changes, use Refresh tasks to display the server version.</p>
-        <button onClick={() => {
-          if (window.confirm("Discard this task's queued local changes and keep the server version? This cannot be undone.")) {
-            void discardTaskConflict(conflict.id).then(retrySync).catch(e => setOffline(status => ({ ...status, error: (e as Error).message })));
-          }
-        }}>Discard local changes for {conflict.title}</button>
+        <button onClick={() => setDiscardConflict({ id: conflict.id, title: conflict.title })}>Discard local changes for {conflict.title}</button>
       </div>)}
     </section>
+    {discardConflict && <Sheet title="Discard local changes" onClose={() => setDiscardConflict(null)}><p>Discard queued changes for {discardConflict.title} and keep the server version? This cannot be undone.</p><div className="row"><button autoFocus onClick={() => setDiscardConflict(null)}>Cancel</button><button className="danger" onClick={() => { const id = discardConflict.id; setDiscardConflict(null); void discardTaskConflict(id).then(retrySync).catch(e => setOffline(status => ({ ...status, error: (e as Error).message }))); }}>Discard changes</button></div></Sheet>}
     <Planner key={user.id} user={user} onLogout={async () => {
       const response = await fetch("/api/session", { method: "DELETE" });
       if (!response.ok) throw new Error("Unable to sign out. Please retry.");
