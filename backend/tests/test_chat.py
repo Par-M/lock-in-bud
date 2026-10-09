@@ -72,16 +72,14 @@ def test_chat_rate_limit_is_per_authenticated_user(client, monkeypatch):
         json={"content": "Hello"},
     )
     assert second_user.status_code == 200, second_user.text
-    assert chat._user_rate == {
-        user_a: {"count": 2, "window": 1000},
-        user_b: {"count": 1, "window": 1000},
-    }
+    assert chat._user_rate == {user_a: [1000], user_b: [1000]}
+    assert limited.headers["Retry-After"] == "60"
     assert post.call_count == 2
     for call in post.call_args_list:
         assert call.kwargs["headers"] == {"x-goog-api-key": "test-key"}
         assert "test-key" not in call.args[0]
-        assert call.kwargs["json"]["systemInstruction"] == {"parts": [{"text": SYSTEM_PROMPT}]}
-        assert call.kwargs["json"]["toolConfig"]["functionCallingConfig"]["mode"] == "NONE"
+        assert call.kwargs["json"]["systemInstruction"]["parts"][0] == {"text": SYSTEM_PROMPT}
+        assert call.kwargs["json"]["toolConfig"]["functionCallingConfig"]["mode"] == "AUTO"
 
 
 @pytest.mark.parametrize(
@@ -129,4 +127,4 @@ def test_chat_prompt_matches_registered_tools():
     prompt_tools = SYSTEM_PROMPT.split("Registered tools", 1)[1].split("\n\n", 1)[0]
     names = {line[2:].split("(", 1)[0] for line in prompt_tools.splitlines() if line.startswith("- ")}
     assert names == {tool["name"] for tool in declarations}
-    assert "Tool calls are not executed by this chat" in SYSTEM_PROMPT
+    assert "human must press Confirm" in SYSTEM_PROMPT

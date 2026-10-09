@@ -60,6 +60,7 @@ class PlannerService:
                 select(CalendarBlock)
                 .where(
                     CalendarBlock.user_id == self.user_id,
+                    CalendarBlock.deleted_at.is_(None),
                     CalendarBlock.start_at >= window_start,
                     CalendarBlock.start_at < window_end,
                 )
@@ -72,6 +73,7 @@ class PlannerService:
             for task in self.db.scalars(
                 select(Task).where(
                     Task.user_id == self.user_id,
+                    Task.deleted_at.is_(None),
                     Task.id.in_(task_ids),
                 )
             ).all()
@@ -123,6 +125,7 @@ class PlannerService:
                 self.db.scalars(
                     select(Task).where(
                         Task.user_id == self.user_id,
+                    Task.deleted_at.is_(None),
                         Task.is_archived.is_(False),
                         Task.status != TaskStatus.completed,
                     )
@@ -139,6 +142,7 @@ class PlannerService:
             .select_from(Task)
             .where(
                 Task.user_id == self.user_id,
+                    Task.deleted_at.is_(None),
                 Task.completed_at >= today_start,
                 Task.completed_at < tomorrow,
             )
@@ -183,6 +187,7 @@ class PlannerService:
                 select(Task)
                 .where(
                     Task.user_id == self.user_id,
+                    Task.deleted_at.is_(None),
                     Task.completed_at >= today_start,
                     Task.completed_at < tomorrow,
                     Task.is_archived.is_(False),
@@ -223,6 +228,7 @@ class PlannerService:
                 select(CalendarBlock)
                 .where(
                     CalendarBlock.user_id == self.user_id,
+                    CalendarBlock.deleted_at.is_(None),
                     CalendarBlock.updated_at >= today_start,
                     CalendarBlock.updated_at < tomorrow,
                 )

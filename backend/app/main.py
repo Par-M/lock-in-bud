@@ -2,6 +2,7 @@ from fastapi import FastAPI
 
 from app.api.auth import router as auth_router
 from app.api.routes.admin import router as admin_router
+from app.api.routes.chat import router as chat_router
 from app.api.routes.calendar import router as calendar_router
 from app.api.routes.devices import router as devices_router
 from app.api.routes.focus import router as focus_router
@@ -33,11 +34,9 @@ app.include_router(habits_router, prefix="/api/v1")
 app.include_router(focus_router, prefix="/api/v1")
 app.include_router(reflections_router, prefix="/api/v1")
 app.include_router(admin_router, prefix="/api/v1")
+app.include_router(chat_router, prefix="/api/v1")
 
 
 @app.get("/")
 def root():
     return {"message": "AI Scheduler API"}
-
-from app.api.routes.chat import router as chat_router
-app.include_router(chat_router, prefix="/api/v1")

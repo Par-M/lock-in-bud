@@ -32,6 +32,8 @@ class Settings(BaseSettings):
     chat_max_turns: int = 8
     chat_include_context: bool = True
     chat_context_max_chars: int = 4000
+    chat_history_max_chars: int = 24000
+    chat_turn_timeout_seconds: float = 80.0
 
 
 settings = Settings()

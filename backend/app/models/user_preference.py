@@ -9,6 +9,7 @@ from sqlalchemy import String
 from sqlalchemy import UniqueConstraint
 from sqlalchemy import func
 from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped
 from sqlalchemy.orm import mapped_column
 from sqlalchemy.orm import relationship
@@ -34,6 +35,8 @@ class UserPreference(Base):
         nullable=False,
         index=True,
     )
+
+    assistant_memory: Mapped[list[str] | None] = mapped_column(JSONB, nullable=True)
 
     work_hours_start: Mapped[float] = mapped_column(
         Float,
