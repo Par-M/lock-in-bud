@@ -3,7 +3,6 @@
 import { Fragment, useEffect, useRef, useState, type ReactNode, type FormEvent } from "react";
 import {
   CalendarDays,
-  Sun,
   ListChecks,
   CircleCheck,
   Circle,
@@ -22,7 +21,6 @@ import {
   Pencil,
   Trash2,
 } from "lucide-react";
-import { TodayScreen } from "@/components/today";
 import { Assistant } from "@/components/assistant";
 import { Sheet } from "@/components/sheet";
 import { api } from "@/lib/api";
@@ -111,9 +109,8 @@ type FocusRun = {
   sessionId?: string;
   uncertain?: "session" | "time";
 };
-type Tab = "Today" | "Schedule" | "Tasks" | "Habits" | "Focus";
+type Tab = "Schedule" | "Tasks" | "Habits" | "Focus";
 const tabs = [
-  { name: "Today", icon: Sun },
   { name: "Schedule", icon: CalendarDays },
   { name: "Tasks", icon: ListChecks },
   { name: "Habits", icon: CircleCheck },
@@ -557,7 +554,7 @@ function SchedulingPreferences({ onSaved }: { onSaved: () => void }) {
 
 export default function Planner({ user, onLogout }: { user: { id: string; name: string | null; email: string | null }; onLogout: () => Promise<void> }) {
   const [availability, setAvailability] = useState(emptyCalendarAvailability);
-  const [tab, setTab] = useState<Tab>("Today");
+  const [tab, setTab] = useState<Tab>("Schedule");
   const [reload, setReload] = useState(0);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [archivedTasks, setArchivedTasks] = useState<Task[]>([]);
@@ -670,7 +667,7 @@ export default function Planner({ user, onLogout }: { user: { id: string; name: 
           const result = await api<{ items: Task[] }>(`/tasks?archived=true&${taskQuery}`);
           if (active) setArchivedTasks(result.items);
         }
-        if (tab === "Schedule" || tab === "Today") {
+        if (tab === "Schedule") {
           const result = await api<{ items: Block[] }>("/calendar/blocks");
           if (active) setBlocks(result.items);
         }
@@ -1013,8 +1010,6 @@ export default function Planner({ user, onLogout }: { user: { id: string; name: 
       return totals;
     }, {}),
   ).sort(([a], [b]) => a.localeCompare(b));
-  const activeTasks = tasks.filter(t => !t.is_archived && !taskDone(t)).sort((a,b) => (a.deadline || "9999").localeCompare(b.deadline || "9999"));
-  const todayTasks = activeTasks.filter(t => (t.repeat_weekdays?.includes(new Date().getDay()) && (!t.start_at || dateKey(new Date(t.start_at)) <= today) && (!t.repeat_ends_on || dateKey(new Date(t.repeat_ends_on)) >= today)) || (t.deadline && dateKey(new Date(t.deadline)) <= today) || (t.start_at && dateKey(new Date(t.start_at)) === today));
   const taskGroup = (t: Task) => {
     if (t.is_archived) return "Archived";
     if (taskDone(t)) return "Completed";
@@ -1026,10 +1021,6 @@ export default function Planner({ user, onLogout }: { user: { id: string; name: 
   };
   const groupOrder = ["Overdue", "Today", "Upcoming", "Unscheduled", "Completed", "Archived"];
   const groupedTasks = [...displayedTasks].sort((a,b) => groupOrder.indexOf(taskGroup(a)) - groupOrder.indexOf(taskGroup(b)));
-  const nextTask = [...todayTasks, ...activeTasks].find(t => !t.start_at);
-  const todayStart = new Date(); todayStart.setHours(0,0,0,0);
-  const todayEnd = new Date(todayStart); todayEnd.setDate(todayEnd.getDate() + 1);
-  const nextEvent = [...blocks.filter(b => !b.completed_at), ...fixedEventsForDay(tasks.filter(t => !taskDone(t)), blocks, todayStart).map(e => ({ title: e.task.title, start_at: e.start_at, end_at: e.end_at }))].filter(b => new Date(b.start_at).getTime() < todayEnd.getTime() && new Date(b.end_at).getTime() > clock).sort((a,b) => a.start_at.localeCompare(b.start_at))[0];
   return (
     <div className="planner">
       <datalist id="planner-categories">
@@ -1101,12 +1092,11 @@ export default function Planner({ user, onLogout }: { user: { id: string; name: 
                   setEditingHabit(null);
                   setEditingBlock(null);
                   if (tab === "Tasks") openTask();
-                  else if (tab === "Today") openTask();
                   else setSheet(tab === "Habits" ? "habit" : "block");
                 }}
               >
                 <Plus />
-                <span>{tab === "Tasks" || tab === "Today" ? "New task" : tab === "Habits" ? "New habit" : "Add block"}</span>
+                <span>{tab === "Tasks" ? "New task" : tab === "Habits" ? "New habit" : "Add block"}</span>
               </button>
             )}
           </div>
@@ -1128,15 +1118,6 @@ export default function Planner({ user, onLogout }: { user: { id: string; name: 
             Loading {tab.toLowerCase()}...
           </p>
         )}
-        {tab === "Today" && <TodayScreen
-          tasks={todayTasks} nextTask={nextTask} nextEvent={nextEvent}
-          focusTitle={run ? tasks.find(t => t.id === run.taskId)?.title || "Focus session in progress" : null}
-          busy={busy} loading={loading} timerReady={timerReady} pending={pendingRows} errors={rowErrors}
-          onAdd={() => openTask()} onEdit={id => openTask(tasks.find(t => t.id === id))}
-          onComplete={id => { const task = tasks.find(t => t.id === id); if (task) toggleTask(task); }}
-          onFocus={id => run ? setTab("Focus") : startFocus(id || "")}
-          onSchedule={() => { setSelectedDate(today); setTab("Schedule"); }} onTasks={() => setTab("Tasks")}
-        />}
         {tab === "Schedule" && (
           <div className="schedule-layout">
             <section className="card calendar-card" aria-label="Month calendar">

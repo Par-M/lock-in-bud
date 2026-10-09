@@ -1,6 +1,6 @@
 # Everyday planning experience
 
-Web and iOS open on Today: a suggested next task, the next event, and tasks due today or overdue. Schedule, Tasks, Habits, and Focus remain available from navigation.
+Web and iOS open on Schedule. Tasks, Habits, and Focus remain available from navigation. The Today tab and its dashboard have been removed.
 
 New task forms show the title, deadline, and estimated time first. More options contains recurrence, priority, categories, notes, and checklists. Events require start and end times. Editing exposes existing advanced values.
 
@@ -14,7 +14,7 @@ The web interface includes improved dark-theme action contrast, keyboard focus r
 
 ## Validation
 
-- Full browser regression suite: 130 passed before the final Today component extraction; focused browser checks cover the extracted component, dark theme, timer pause/reload, forms, confirmations, and assistant responsiveness.
+- Full browser regression suite: 130 passed for the initial UX changes; focused browser checks cover the four-tab navigation, dark theme, timer pause/reload, forms, confirmations, and assistant responsiveness.
 - iOS simulator unit tests: 20 passed; final simulator build also checked.
 - Backend focus API compatibility: 31 passed. No database migration is required by these UI changes.
 

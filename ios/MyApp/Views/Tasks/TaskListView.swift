@@ -640,3 +640,19 @@ private struct OverdueListSheet: View {
         .environment(AuthenticationService())
         .environment(NotificationService.shared)
 }
+
+
+extension TaskItem {
+    var todayGroup: String {
+        let calendar = Calendar.current
+        let today = calendar.startOfDay(for: .now)
+        if let days = repeatWeekdays, !days.isEmpty {
+            let weekday = calendar.component(.weekday, from: .now) - 1
+            if days.contains(weekday), startAt.map({ calendar.startOfDay(for: $0) <= today }) ?? true, repeatEndsOn.map({ $0 >= today }) ?? true { return "Today" }
+            return "Upcoming"
+        }
+        if let deadline, deadline < .now { return "Overdue" }
+        if let date = deadline ?? startAt { return date < today ? "Overdue" : calendar.isDateInToday(date) ? "Today" : "Upcoming" }
+        return "Unscheduled"
+    }
+}
