@@ -85,6 +85,8 @@ async function mockService(page: Page, seeded = false) {
       const items = [...(state.records.get(state.account)?.values() || [])].filter(record => !record.deleted && Boolean(record.task.is_archived) === (url.searchParams.get("archived") === "true")).map(record => record.task);
       return route.fulfill({ json: { items, total: items.length } });
     }
+    if (path === "/focus/sessions") return route.fulfill({ json: [] });
+    if (path === "/focus/summary") return route.fulfill({ json: { total_duration_seconds: 0, session_count: 0 } });
     if (path === "/notifications/preferences") return route.fulfill({ json: {
       morning_briefing_enabled: false, morning_briefing_time: "08:00:00", deadline_reminder_enabled: false,
       deadline_reminder_lead_hours: 24, overdue_alerts_enabled: false, fifteen_minute_reminder_enabled: false,
@@ -133,6 +135,7 @@ test("offline create and edit survive reload and reconnect using stable operatio
   await page.goto("/"); await tasks(page); await warmDefaults(page);
   state.disconnected = true; await connection(page, false);
   await create(page, "Offline draft");
+  if (await page.getByLabel("More actions for Offline draft", { exact: true }).locator("..").getAttribute("open") === null) await page.getByLabel("More actions for Offline draft", { exact: true }).click();
   await page.getByRole("button", { name: "Edit Offline draft", exact: true }).click();
   await page.getByRole("textbox", { name: "Title", exact: true }).fill("Offline edited");
   await page.getByRole("button", { name: "Save changes", exact: true }).click();
@@ -170,6 +173,7 @@ test("offline edits preserve full payload, retain revision conflicts, and requir
   const { state, change } = await mockService(page, true);
   await page.goto("/"); await tasks(page);
   state.disconnected = true; await connection(page, false);
+  if (await page.getByLabel("More actions for Existing task", { exact: true }).locator("..").getAttribute("open") === null) await page.getByLabel("More actions for Existing task", { exact: true }).click();
   await page.getByRole("button", { name: "Edit Existing task", exact: true }).click();
   await page.getByRole("textbox", { name: "Title", exact: true }).fill("Local edit");
   await page.getByRole("button", { name: "Save changes", exact: true }).click();
@@ -187,22 +191,24 @@ test("offline edits preserve full payload, retain revision conflicts, and requir
   await expect.poll(async () => (await snapshot(page)).outbox[0].conflict).toBeTruthy();
   expect(state.pushes).toHaveLength(1);
   expect(state.records.get(accountA)!.get(taskId)!.task.title).toBe("Remote edit");
-  page.once("dialog", dialog => dialog.accept());
   await page.getByRole("button", { name: "Discard local changes for Local edit", exact: true }).click();
+  await page.getByRole("dialog", { name: "Discard local changes" }).getByRole("button", { name: "Discard changes", exact: true }).click();
   await expect(page.getByRole("region", { name: "Task sync status" })).toContainText("No pending task changes");
 });
 
 test("offline delete uses a revision and full task payload, while online start keeps its route", async ({ page }) => {
   const { state } = await mockService(page, true);
   await page.goto("/"); await tasks(page);
-  await page.getByRole("button", { name: "Start task Existing task", exact: true }).click();
+  await page.getByRole("button", { name: "Focus on Existing task", exact: true }).click();
   await expect.poll(() => state.actions).toEqual([`/tasks/${taskId}/start`]);
+  await tasks(page);
   await expect(page.getByText("in progress", { exact: true })).toBeVisible();
   state.disconnected = true; await connection(page, false);
   await page.getByRole("button", { name: "Complete Existing task", exact: true }).click();
   await expect(page.getByRole("alert").filter({ hasText: "This action requires an online connection and is not queued." })).toBeVisible();
-  page.once("dialog", dialog => dialog.accept());
+  if (await page.getByLabel("More actions for Existing task", { exact: true }).locator("..").getAttribute("open") === null) await page.getByLabel("More actions for Existing task", { exact: true }).click();
   await page.getByRole("button", { name: "Delete Existing task", exact: true }).click();
+  await page.getByRole("dialog", { name: "Confirm action" }).getByRole("button", { name: "Confirm", exact: true }).click();
   await expect(page.getByRole("button", { name: "Existing task", exact: true })).toHaveCount(0);
   const queued = (await snapshot(page)).outbox[0].operation;
   expect(queued.operation).toBe("delete"); expect(queued.base_revision).toBe(8); expect(queued.payload.id).toBe(taskId);
@@ -293,9 +299,11 @@ test("online create with a status transition uses sync for details and normal st
   await page.goto("/"); await tasks(page);
   await page.getByRole("button", { name: "New task", exact: true }).click();
   await page.getByRole("textbox", { name: "Title", exact: true }).fill("Online transition task");
-  await page.getByRole("combobox", { name: "Status", exact: true }).selectOption("in_progress");
+  await expect(page.getByRole("combobox", { name: "Status", exact: true })).toHaveCount(0);
   await page.getByRole("button", { name: "Create task", exact: true }).click();
   await expect(page.getByRole("button", { name: "Online transition task", exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Focus on Online transition task", exact: true }).click();
+  await tasks(page);
   await expect(page.getByText("in progress", { exact: true })).toBeVisible();
   const id = [...state.records.get(accountA)!.keys()][0];
   expect(state.pushes[0].operation.payload.status).toBe("pending");
@@ -341,7 +349,8 @@ test.describe("production offline app shell", () => {
     expect(await page.evaluate(() => navigator.onLine)).toBe(false);
     await tasks(page);
     await expect(page.getByRole("button", { name: "Existing task", exact: true })).toBeVisible();
-    await page.getByRole("button", { name: "Edit Existing task", exact: true }).click();
+    if (await page.getByLabel("More actions for Existing task", { exact: true }).locator("..").getAttribute("open") === null) await page.getByLabel("More actions for Existing task", { exact: true }).click();
+  await page.getByRole("button", { name: "Edit Existing task", exact: true }).click();
     await page.getByRole("textbox", { name: "Title", exact: true }).fill("Cold reload edit");
     await page.getByRole("button", { name: "Save changes", exact: true }).click();
     await expect(page.getByRole("button", { name: "Cold reload edit", exact: true })).toBeVisible();

@@ -2,6 +2,8 @@ import SwiftUI
 
 struct TaskRow: View {
     let task: TaskItem
+    var isBusy = false
+    var issue: String? = nil
     var onChangeStatus: (TaskStatus) -> Void = { _ in }
     var onStartFocus: (TaskItem) -> Void = { _ in }
 
@@ -16,11 +18,12 @@ struct TaskRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 8) {
+                if isBusy { ProgressView().accessibilityLabel("Saving task") }
                 PriorityBadge(priority: task.priority)
                 Text(task.title)
                     .font(.body.weight(.medium))
                     .strikethrough(task.status == .completed, color: .secondary)
-                    .lineLimit(1)
+                    .lineLimit(2)
                 Spacer(minLength: 4)
                 if task.status != .completed {
                     Button {
@@ -45,7 +48,8 @@ struct TaskRow: View {
                 if let category = task.category, !category.isEmpty {
                     Text(category)
                         .padding(.horizontal, 8)
-                        .padding(.vertical, 2)
+                        .disabled(isBusy)
+        .padding(.vertical, 2)
                         .background(.quaternary, in: Capsule())
                 }
                 Spacer(minLength: 8)
@@ -53,6 +57,7 @@ struct TaskRow: View {
             }
             .font(.caption)
             .foregroundStyle(.secondary)
+            if let issue { Label(issue, systemImage: "exclamationmark.triangle").font(.caption).foregroundStyle(.orange) }
         }
         .padding(.vertical, 2)
     }
@@ -78,7 +83,7 @@ struct TaskRow: View {
             HStack(spacing: 2) {
                 Text(task.status.label)
                     .font(.caption2.weight(.medium))
-                    .lineLimit(1)
+                    .lineLimit(2)
                 Image(systemName: "chevron.down")
                     .font(.system(size: 8).weight(.semibold))
             }
@@ -102,7 +107,7 @@ struct DeferredTaskRow: View {
                     PriorityBadge(priority: task.priority)
                     Text(task.title)
                         .font(.body.weight(.medium))
-                        .lineLimit(1)
+                        .lineLimit(2)
                     Spacer(minLength: 4)
                     Button {
                         onStartFocus(task)
@@ -148,7 +153,7 @@ struct DeferredTaskRow: View {
                         HStack(spacing: 2) {
                             Text(task.status.label)
                                 .font(.caption2.weight(.medium))
-                                .lineLimit(1)
+                                .lineLimit(2)
                             Image(systemName: "chevron.down")
                                 .font(.system(size: 8).weight(.semibold))
                         }
@@ -172,24 +177,12 @@ struct TimeFractionLabel: View {
     let actual: Int
     let estimated: Int
 
-    private var color: Color {
-        guard estimated > 0 else { return Color.secondary }
-        switch Double(actual) / Double(estimated) {
-        case ...0.5:
-            return Color.secondary
-        case ...1.0:
-            return Color.orange
-        default:
-            return Color.green
-        }
-    }
-
     var body: some View {
-        Text("\(actual)/\(estimated)min")
+        Text("\(actual) of \(estimated) min tracked")
             .font(.caption2.weight(.medium))
             .monospacedDigit()
-            .foregroundStyle(color)
-            .lineLimit(1)
+            .foregroundStyle(.secondary)
+            .lineLimit(2)
     }
 }
 
@@ -227,6 +220,9 @@ struct TaskListView: View {
     @State private var quickTaskTitle = ""
     @State private var isAddingQuickTask = false
     @State private var quickAddError: String?
+    @State private var rowError: String?
+    @State private var savingRows = Set<UUID>()
+    @State private var rowIssues: [UUID: String] = [:]
     @State private var reschedulingTask: TaskItem?
     @State private var errorDismissed = false
     @State private var isCompletedExpanded = false
@@ -289,12 +285,28 @@ struct TaskListView: View {
         }
     }
 
+    private func changeStatus(_ status: TaskStatus, task: TaskItem) {
+        guard !savingRows.contains(task.id) else { return }
+        savingRows.insert(task.id)
+        rowIssues[task.id] = nil
+        Task {
+            defer { savingRows.remove(task.id) }
+            do { _ = try await taskService.setStatus(status, for: task) }
+            catch { rowIssues[task.id] = "Couldn’t update this task. Your changes were not confirmed; retry the action." }
+        }
+    }
+
     private func startFocus(_ task: TaskItem) {
+        let wasRunning = FocusTimerStarter.startedAt > 0
         FocusTimerStarter.startFocus(
             taskID: task.id,
             title: task.title,
             category: task.category
         )
+        if !wasRunning, task.status == .pending {
+            Task { do { _ = try await taskService.startTask(id: task.id) } catch { rowError = "Timer started. Task status could not be updated; check the task when online." } }
+        }
+        NotificationCenter.default.post(name: .openFocus, object: nil)
     }
 
     private var activeTasks: [TaskItem] {
@@ -324,6 +336,7 @@ struct TaskListView: View {
                     if !searchText.isEmpty {
                         ContentUnavailableView.search(text: searchText)
                     } else {
+                        VStack {
                         ContentUnavailableView(
                             taskService.showingArchived ? "No Archived Tasks" : "No Tasks Yet",
                             systemImage: "checklist",
@@ -333,41 +346,23 @@ struct TaskListView: View {
                                     : "Tap + to create your first task."
                             )
                         )
+                        Button("Add your first task") { showAddTask = true }.buttonStyle(.borderedProminent)
+                        }
                     }
                 } else {
                     List {
                         quickAddSection
-                        if !deferredTasks.isEmpty && !taskService.showingArchived {
-                            Section {
-                                ForEach(deferredTasks) { task in
-                                    NavigationLink(value: task) {
-                                        DeferredTaskRow(task: task) { status in
-                                            Task {
-                                                try? await taskService.setStatus(status, for: task)
-                                            }
-                                        } onStartFocus: { task in
-                                            startFocus(task)
+                        ForEach(["Overdue", "Today", "Upcoming", "Unscheduled"], id: \.self) { group in
+                            let items = activeTasks.filter { $0.todayGroup == group }
+                            if !items.isEmpty {
+                                Section(group) {
+                                    ForEach(items) { task in
+                                        NavigationLink(value: task) {
+                                            TaskRow(task: task, isBusy: savingRows.contains(task.id), issue: rowIssues[task.id]) { status in
+                                                changeStatus(status, task: task)
+                                            } onStartFocus: { task in startFocus(task) }
                                         }
                                     }
-                                }
-                            } header: {
-                                HStack(spacing: 4) {
-                                    Image(systemName: "exclamationmark.triangle.fill")
-                                        .foregroundStyle(.orange)
-                                    Text("Behind Schedule")
-                                        .font(.caption.weight(.semibold))
-                                }
-                            }
-                        }
-
-                        ForEach(schedulableTasks) { task in
-                            NavigationLink(value: task) {
-                                TaskRow(task: task) { status in
-                                    Task {
-                                        try? await taskService.setStatus(status, for: task)
-                                    }
-                                } onStartFocus: { task in
-                                    startFocus(task)
                                 }
                             }
                         }
@@ -377,10 +372,8 @@ struct TaskListView: View {
                                 DisclosureGroup(isExpanded: $isCompletedExpanded) {
                                     ForEach(completedTasks) { task in
                                         NavigationLink(value: task) {
-                                            TaskRow(task: task) { status in
-                                                Task {
-                                                    try? await taskService.setStatus(status, for: task)
-                                                }
+                                            TaskRow(task: task, isBusy: savingRows.contains(task.id), issue: rowIssues[task.id]) { status in
+                                                changeStatus(status, task: task)
                                             }
                                         }
                                     }
@@ -401,6 +394,7 @@ struct TaskListView: View {
                 }
             }
             .navigationTitle(taskService.showingArchived ? "Archived" : "Tasks")
+            .safeAreaInset(edge: .bottom) { if let rowError { HStack { Text(rowError).font(.caption); Button("Dismiss") { self.rowError = nil } }.padding().background(.regularMaterial) } }
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     Menu {

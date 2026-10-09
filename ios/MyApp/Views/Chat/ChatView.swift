@@ -44,7 +44,7 @@ struct ChatView: View {
                                     if let duration = action.args["estimated_duration"], case .number(let minutes) = duration { Text("\(Int(minutes)) minutes") }
                                     if action.status == "pending" {
                                         HStack {
-                                            Button("Confirm") { decide(action, confirm: true) }
+                                            Button(action.name == "create_task" ? "Create task" : action.name == "complete_task" ? "Complete occurrence" : action.name == "start_focus_session" ? "Start timer" : "Remember preference") { decide(action, confirm: true) }
                                             Button("Cancel") { decide(action, confirm: false) }
                                         }.disabled(chatService.isSending || !chatService.isOnline)
                                     } else { Text(action.status.capitalized).font(.caption).foregroundStyle(.secondary) }

@@ -36,6 +36,7 @@ struct TaskFormView: View {
     @State private var beforeTaskIDs: Set<UUID>
     @State private var afterTaskIDs: Set<UUID>
     @State private var isOrderingExpanded: Bool
+    @State private var moreOptions = false
     @State private var isSaving = false
     @State private var errorMessage: String?
 
@@ -201,7 +202,7 @@ struct TaskFormView: View {
         } label: {
             Text(Self.weekdayLetters[day])
                 .font(.system(.subheadline, design: .rounded).weight(.semibold))
-                .frame(width: 40, height: 40)
+                .frame(minWidth: 44, minHeight: 44)
                 .background(
                     isSelected ? Color.accentColor : Color(.secondarySystemBackground),
                     in: Circle()
@@ -210,6 +211,7 @@ struct TaskFormView: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel(Self.weekdayFullNames[day])
+        .accessibilityValue(isSelected ? "Selected" : "Not selected")
         .accessibilityIdentifier("repeatDay\(day)")
     }
 
@@ -258,12 +260,11 @@ struct TaskFormView: View {
                 Section {
                     TextField("Title", text: $title)
                         .accessibilityIdentifier("taskTitleField")
-                    TextField("Description", text: $detail, axis: .vertical)
-                        .lineLimit(2...5)
+
                 }
 
                 Section {
-                    Toggle("Fixed Event", isOn: $hasFixedEvent)
+                    Picker("Type", selection: $hasFixedEvent) { Text("Task").tag(false); Text("Event").tag(true) }.pickerStyle(.segmented)
                     if hasFixedEvent {
                         DatePicker(
                             "Date",
@@ -275,14 +276,14 @@ struct TaskFormView: View {
                             selection: fixedStartBinding,
                             displayedComponents: .hourAndMinute
                         )
-                        .datePickerStyle(.wheel)
+                        .datePickerStyle(.compact)
                         DatePicker(
                             "End",
                             selection: $fixedEnd,
                             in: fixedStart.addingTimeInterval(60)...,
                             displayedComponents: .hourAndMinute
                         )
-                        .datePickerStyle(.wheel)
+                        .datePickerStyle(.compact)
                     }
 
                     if !hasFixedEvent {
@@ -298,7 +299,7 @@ struct TaskFormView: View {
                                 selection: $deadline,
                                 displayedComponents: .hourAndMinute
                             )
-                            .datePickerStyle(.wheel)
+                            .datePickerStyle(.compact)
                         }
 
                         Toggle("Estimated Duration", isOn: $hasDuration)
@@ -334,9 +335,13 @@ struct TaskFormView: View {
                         }
                     }
 
+                }
+                DisclosureGroup("More options", isExpanded: $moreOptions) {
+                    Picker("Priority", selection: $priority) { ForEach(TaskPriority.allCases) { value in Text(value.label).tag(value) } }
+                    TextField("Description", text: $detail, axis: .vertical).lineLimit(2...5)
                     Toggle("Repeats", isOn: $hasRepeat)
                     if hasRepeat {
-                        HStack(spacing: 8) {
+                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 44))], spacing: 8) {
                             ForEach(0..<7, id: \.self) { day in
                                 repeatDayButton(day)
                             }
@@ -353,8 +358,6 @@ struct TaskFormView: View {
                             )
                         }
                     }
-                }
-
                 if !candidateTasks.isEmpty {
                     Section("Ordering", isExpanded: $isOrderingExpanded) {
                         VStack(alignment: .leading, spacing: 12) {
@@ -364,6 +367,7 @@ struct TaskFormView: View {
                     }
                 }
 
+                if case .edit = mode {
                 Section {
                     Picker("Status", selection: $status) {
                         ForEach(TaskStatus.allCases) { status in
@@ -372,6 +376,7 @@ struct TaskFormView: View {
                     }
                 }
 
+                }
                 Section {
                     VStack(alignment: .leading, spacing: 0) {
                         TextField("Category", text: $category)
@@ -397,6 +402,7 @@ struct TaskFormView: View {
                         .padding(.vertical, 4)
                 }
 
+                }
                 if let errorMessage {
                     Section {
                         Text(errorMessage)
@@ -408,6 +414,7 @@ struct TaskFormView: View {
             .navigationTitle(navigationTitle)
             .navigationBarTitleDisplayMode(.inline)
             .task {
+                if case .edit = mode { moreOptions = true }
                 if case .add = mode, scheduleService.preference == nil {
                     await scheduleService.loadPreferences()
                 }
@@ -473,10 +480,10 @@ struct TaskFormView: View {
         isSaving = true
         defer { isSaving = false }
 
-        let deadlineValue = hasDeadline ? deadline : nil
+        let deadlineValue = hasDeadline && !hasFixedEvent ? deadline : nil
         let startAtValue = hasFixedEvent ? fixedStart : nil
         let endAtValue = hasFixedEvent ? fixedEnd : nil
-        let durationValue = hasDuration ? totalDurationMinutes : nil
+        let durationValue = hasDuration && !hasFixedEvent ? totalDurationMinutes : nil
         let categoryValue = category.isEmpty ? nil : category
         let descriptionValue = detail.isEmpty ? nil : detail
         let notesValue = notes.isEmpty ? nil : notes

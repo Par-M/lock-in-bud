@@ -45,8 +45,8 @@ test("streaming renders progressively and confirms an action explicitly", async 
   await expect(dialog.getByRole("combobox")).toHaveValue("chat-1");
   await dialog.getByRole("textbox", { name: "Message", exact: true }).fill("Create a task");
   await dialog.getByRole("button", { name: "Send message", exact: true }).click();
-  await expect(dialog.getByRole("button", { name: "Confirm", exact: true })).toBeVisible(); expect(confirmed).toBe(0);
-  await dialog.getByRole("button", { name: "Confirm", exact: true }).click();
+  await expect(dialog.getByRole("button", { name: "Create task", exact: true })).toBeVisible(); expect(confirmed).toBe(0);
+  await dialog.getByRole("button", { name: "Create task", exact: true }).click();
   await expect(dialog.getByText("confirmed", { exact: true })).toBeVisible(); expect(confirmed).toBe(1);
 });
 

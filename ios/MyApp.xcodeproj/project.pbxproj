@@ -527,7 +527,8 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = MyApp/Resources/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = "Lock In Bud";
-				INFOPLIST_KEY_NSCalendarWriteOnlyAccessUsageDescription = "The app adds your scheduled task blocks to your calendar.";
+				INFOPLIST_KEY_NSCalendarsFullAccessUsageDescription = "Lock In Bud reads calendar events to avoid conflicts and adds scheduled task blocks when you choose to save them.";
+				INFOPLIST_KEY_NSCalendarsWriteOnlyAccessUsageDescription = "Lock In Bud adds scheduled task blocks to your calendar when you choose to save them.";
 				INFOPLIST_KEY_NSCalendarsUsageDescription = "The app reads your calendar to find free time for scheduling your tasks.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = YES;
@@ -585,7 +586,8 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = MyApp/Resources/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = "Lock In Bud";
-				INFOPLIST_KEY_NSCalendarWriteOnlyAccessUsageDescription = "The app adds your scheduled task blocks to your calendar.";
+				INFOPLIST_KEY_NSCalendarsFullAccessUsageDescription = "Lock In Bud reads calendar events to avoid conflicts and adds scheduled task blocks when you choose to save them.";
+				INFOPLIST_KEY_NSCalendarsWriteOnlyAccessUsageDescription = "Lock In Bud adds scheduled task blocks to your calendar when you choose to save them.";
 				INFOPLIST_KEY_NSCalendarsUsageDescription = "The app reads your calendar to find free time for scheduling your tasks.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = YES;

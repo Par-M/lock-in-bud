@@ -35,6 +35,29 @@ final class MyAppTests: XCTestCase {
         XCTAssertEqual(FocusTimerStarter.activeCategory, "Work")
     }
 
+    func testPausedFocusExcludesBreaksAndAccountChangeClearsPauseState() {
+        let defaults = UserDefaults.standard
+        let keys = [FocusTimerStarter.ownerKey, FocusTimerStarter.startedAtKey, FocusTimerStarter.pausedAtKey, FocusTimerStarter.pausedSecondsKey, FocusTimerStarter.activeTaskIDKey, FocusTimerStarter.activeTaskTitleKey, FocusTimerStarter.activeCategoryKey]
+        let original = keys.map { defaults.object(forKey: $0) }
+        defer { for (key, value) in zip(keys, original) { defaults.set(value, forKey: key) } }
+        defaults.set(1000.0, forKey: FocusTimerStarter.startedAtKey)
+        defaults.set(1100.0, forKey: FocusTimerStarter.pausedAtKey)
+        defaults.set(20.0, forKey: FocusTimerStarter.pausedSecondsKey)
+        XCTAssertEqual(FocusTimerStarter.elapsedSeconds(at: 2000), 80)
+        defaults.removeObject(forKey: FocusTimerStarter.pausedAtKey)
+        defaults.set(920.0, forKey: FocusTimerStarter.pausedSecondsKey)
+        XCTAssertEqual(FocusTimerStarter.elapsedSeconds(at: 2050), 130)
+        FocusTimerStarter.synchronizeAccount(UUID())
+        XCTAssertEqual(FocusTimerStarter.elapsedSeconds(at: 2050), 0)
+        XCTAssertFalse(FocusTimerStarter.isPaused)
+        XCTAssertEqual(defaults.double(forKey: FocusTimerStarter.pausedSecondsKey), 0)
+    }
+
+    func testCalendarPermissionHasFullAccessUsageDescription() {
+        let description = Bundle.main.object(forInfoDictionaryKey: "NSCalendarsFullAccessUsageDescription") as? String
+        XCTAssertFalse(description?.isEmpty ?? true, "Full calendar access needs a user-facing usage description")
+    }
+
     func testLogoutEncodesOnlyCurrentRefreshToken() throws {
         let endpoint = AuthEndpoint.logout(refreshToken: "current-session-token")
         let body = try XCTUnwrap(endpoint.body)

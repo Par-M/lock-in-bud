@@ -49,6 +49,7 @@ struct FocusDashboardView: View {
     @State private var showingStats = false
     @State private var pendingSessionStop: SessionStop?
     @AppStorage("focusTimerStartedAt") private var timerStartedAtRef = 0.0
+    @AppStorage("focusTimerPausedAt") private var pausedAt = 0.0
     @State private var elapsedSeconds = 0
     @State private var timer: Timer?
 
@@ -100,7 +101,8 @@ struct FocusDashboardView: View {
                     await logSession(
                         startedAt: stop.startedAt,
                         endedAt: stop.endedAt,
-                        category: category
+                        category: category,
+                        trackedSeconds: stop.trackedSeconds
                     )
                 }
             }
@@ -109,7 +111,7 @@ struct FocusDashboardView: View {
                 await focus.loadMorningMessage()
                 await rescheduleNotifications()
                 if isTimerRunning {
-                    WidgetDataStore.writeFocus(startedAt: timerStartedAtRef, title: "Deep Work Session")
+                    WidgetDataStore.writeFocus(startedAt: FocusTimerStarter.isPaused ? 0 : Date().timeIntervalSince1970 - Double(FocusTimerStarter.elapsedSeconds()), title: FocusTimerStarter.isPaused ? "Paused · focus session" : FocusTimerStarter.activeTaskTitle ?? "Focus session")
                     WidgetCenter.shared.reloadTimelines(ofKind: "FocusTimerWidget")
                 }
             }
@@ -142,6 +144,7 @@ struct FocusDashboardView: View {
                     .monospacedDigit()
                     .accessibilityIdentifier("focusTimerLabel")
 
+                Button(pausedAt > 0 ? "Resume" : "Pause", systemImage: pausedAt > 0 ? "play.fill" : "pause.fill") { FocusTimerStarter.togglePause() }.buttonStyle(.bordered)
                 Button(role: .destructive) {
                     stopTimer()
                 } label: {
@@ -175,7 +178,7 @@ struct FocusDashboardView: View {
 
     private func resumeTickerIfRunning() {
         guard isTimerRunning, let started = timerStartedAt else { return }
-        elapsedSeconds = Int(Date().timeIntervalSince(started))
+        elapsedSeconds = FocusTimerStarter.elapsedSeconds()
         startTicker()
     }
 
@@ -189,7 +192,7 @@ struct FocusDashboardView: View {
         timer?.invalidate()
         timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { _ in
             Task { @MainActor in
-                self.elapsedSeconds = Int(Date().timeIntervalSince(self.timerStartedAt ?? .now))
+                self.elapsedSeconds = FocusTimerStarter.elapsedSeconds()
             }
         }
     }
@@ -205,6 +208,7 @@ struct FocusDashboardView: View {
         timer = nil
         guard let started = timerStartedAt else { return }
         let ended = Date()
+        let trackedSeconds = max(1, FocusTimerStarter.elapsedSeconds())
         timerStartedAtRef = 0
         WidgetDataStore.writeFocus(startedAt: 0)
         WidgetCenter.shared.reloadTimelines(ofKind: "FocusTimerWidget")
@@ -213,10 +217,10 @@ struct FocusDashboardView: View {
                 if #available(iOS 16.1, *) {
                     await FocusLiveActivityManager.endLiveActivity(elapsedSeconds: elapsedSeconds)
                 }
-                await logSession(startedAt: started, endedAt: ended, category: nil)
+                await logSession(startedAt: started, endedAt: ended, category: nil, trackedSeconds: trackedSeconds)
             }
         } else {
-            pendingSessionStop = SessionStop(startedAt: started, endedAt: ended)
+            pendingSessionStop = SessionStop(startedAt: started, endedAt: ended, trackedSeconds: trackedSeconds)
             Task {
                 if #available(iOS 16.1, *) {
                     await FocusLiveActivityManager.endLiveActivity(elapsedSeconds: elapsedSeconds)
@@ -225,7 +229,7 @@ struct FocusDashboardView: View {
         }
     }
 
-    private func logSession(startedAt: Date, endedAt: Date, category: String?) async {
+    private func logSession(startedAt: Date, endedAt: Date, category: String?, trackedSeconds: Int? = nil) async {
         let activeTaskID = FocusTimerStarter.activeTaskID
         let activeCategory = FocusTimerStarter.activeCategory
         FocusTimerStarter.clearActiveTask()
@@ -233,7 +237,7 @@ struct FocusDashboardView: View {
         if let resolvedCategory, !resolvedCategory.isEmpty {
             categoryStore.add(resolvedCategory)
         }
-        let seconds = max(1, Int(endedAt.timeIntervalSince(startedAt)))
+        let seconds = trackedSeconds ?? max(1, Int(endedAt.timeIntervalSince(startedAt)))
         await focus.createSession(
             taskID: activeTaskID,
             startedAt: startedAt,
@@ -286,4 +290,5 @@ struct SessionStop: Identifiable {
     let id = UUID()
     let startedAt: Date
     let endedAt: Date
+    var trackedSeconds: Int? = nil
 }

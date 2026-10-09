@@ -195,8 +195,8 @@ for (const uncertain of ["session", "time"] as const) {
     await expect(page.getByRole("button", { name: "Saving disabled: review required" })).toBeDisabled();
     expect(writes).toBe(0);
     expect(await page.evaluate((key) => localStorage.getItem(key), timerKey)).toBe(saved);
-    page.once("dialog", (dialog) => dialog.accept());
     await page.getByRole("button", { name: "Discard pending state (no writes)" }).click();
+  await page.getByRole("dialog", { name: "Confirm action" }).getByRole("button", { name: "Confirm", exact: true }).click();
     await expect(page.getByRole("button", { name: "Start focus session" })).toBeVisible();
     expect(writes).toBe(0);
   });

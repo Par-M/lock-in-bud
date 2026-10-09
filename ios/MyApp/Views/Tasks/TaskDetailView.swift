@@ -8,6 +8,8 @@ struct TaskDetailView: View {
     @State private var currentTask: TaskItem
     @State private var showEdit = false
     @State private var confirmDelete = false
+    @State private var archiveNotice = false
+    @State private var archiveBusy = false
     @State private var confirmArchive = false
     @State private var errorMessage: String?
 
@@ -33,7 +35,7 @@ struct TaskDetailView: View {
             }
 
             if !currentTask.isArchived && currentTask.completedAt == nil {
-                Section("Progress") {
+                Section("Time and completion") {
                     if let estimated = currentTask.estimatedDuration, estimated > 0 {
                         CompletenessSlider(
                             estimatedMinutes: estimated,
@@ -53,7 +55,7 @@ struct TaskDetailView: View {
                                 .font(.title3.weight(.semibold))
                                 .monospacedDigit()
                             Spacer()
-                            Text("Completed blocks")
+                            Text("Scheduled blocks completed")
                                 .font(.footnote)
                                 .foregroundStyle(.secondary)
                         }
@@ -64,7 +66,7 @@ struct TaskDetailView: View {
                         Button {
                             markComplete()
                         } label: {
-                            Label("Mark Complete", systemImage: "checkmark.circle.fill")
+                            Label(currentTask.repeatWeekdays?.isEmpty == false ? "Complete today’s occurrence" : "Mark Complete", systemImage: "checkmark.circle.fill")
                                 .frame(maxWidth: .infinity)
                         }
                         .buttonStyle(.borderedProminent)
@@ -149,6 +151,9 @@ struct TaskDetailView: View {
         } message: {
             Text("This cannot be undone.")
         }
+        .safeAreaInset(edge: .bottom) {
+            if archiveNotice { HStack { Text(currentTask.isArchived ? "Task archived" : "Task restored"); Spacer(); Button("Undo") { toggleArchive() }.disabled(archiveBusy); Button("Dismiss") { archiveNotice = false } }.padding().background(.regularMaterial) }
+        }
         .confirmationDialog(
             "Archive this task?",
             isPresented: $confirmArchive,
@@ -161,25 +166,23 @@ struct TaskDetailView: View {
         } message: {
             Text("Archived tasks are hidden from your lists but can be restored anytime.")
         }
-        .alert("Something went wrong", isPresented: .init(
-            get: { errorMessage != nil },
-            set: { if !$0 { errorMessage = nil } }
-        )) {
-            Button("OK") { errorMessage = nil }
-        } message: {
-            Text(errorMessage ?? "")
+        .safeAreaInset(edge: .top) {
+            if let errorMessage { HStack { Label(errorMessage, systemImage: "exclamationmark.triangle").font(.caption); Button("Dismiss") { self.errorMessage = nil } }.padding().background(.regularMaterial) }
         }
     }
 
     private func toggleArchive() {
+        guard !archiveBusy else { return }
+        archiveBusy = true
         Task {
+            defer { archiveBusy = false }
             do {
                 if currentTask.isArchived {
-                    _ = try await taskService.restoreTask(currentTask)
+                    currentTask = try await taskService.restoreTask(currentTask)
                 } else {
-                    _ = try await taskService.archiveTask(currentTask)
+                    currentTask = try await taskService.archiveTask(currentTask)
                 }
-                dismiss()
+                archiveNotice = true
             } catch {
                 errorMessage = error.localizedDescription
             }

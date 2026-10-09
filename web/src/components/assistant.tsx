@@ -197,7 +197,7 @@ export function Assistant({ userId, onClose, onTask, onChanged, onStartFocus }: 
     engine.onend = () => setListening(false);
     engine.start(); setListening(true);
   }
-  return <Sheet title="Planner assistant" onClose={onClose}><div className="stack">
+  return <Sheet sidePanel title="Planner assistant" onClose={onClose}><div className="stack">
     <p className="muted">Ask about your planner. Review and confirm proposed changes before they are applied.</p>
     <div className="row"><label className="grow">Conversation<select value={current?.id || ""} disabled={busy || !online} onChange={e => void select(e.target.value)}><option value="">Choose a conversation</option>{conversations.map(c => <option key={c.id} value={c.id}>{c.title || "Untitled conversation"}</option>)}</select></label>
       <button disabled={busy || !online} onClick={() => { setBusy(true); void create().catch(e => setError(errorText(e))).finally(() => setBusy(false)); }}><Plus /> New</button></div>
@@ -216,7 +216,7 @@ export function Assistant({ userId, onClose, onTask, onChanged, onStartFocus }: 
         </MessageContent></Message></MessageScrollerItem>)}
       {sending && <div role="status">{partial || "Assistant is thinking…"}</div>}
     </MessageScrollerContent></MessageScrollerViewport></MessageScroller></MessageScrollerProvider>
-    {current?.actions?.map(a => <section className="chat-action" key={a.action_id} aria-label="Proposed action"><strong>{a.name.replaceAll("_", " ")}</strong><pre>{JSON.stringify(a.args, null, 2)}</pre>{a.status === "pending" ? <div className="row"><button disabled={busy || !online} onClick={() => void decide(a, true)}>Confirm</button><button disabled={busy || !online} onClick={() => void decide(a, false)}>Cancel</button></div> : <p>{a.status}</p>}</section>)}
+    {current?.actions?.map(a => <section className="chat-action" key={a.action_id} aria-label="Proposed action"><strong>{a.name.replaceAll("_", " ")}</strong><p>{String(a.args.title || a.args.fact || (a.name === "start_focus_session" ? "Start the timer on this device" : "Update the selected task occurrence"))}</p>{!!a.args.deadline && <p>Deadline: {new Date(String(a.args.deadline)).toLocaleString()}</p>}{!!a.args.date && <p>Occurrence: {String(a.args.date)}</p>}{a.status === "pending" ? <div className="row"><button disabled={busy || !online} onClick={() => void decide(a, true)}>{a.name === "create_task" ? "Create task" : a.name === "complete_task" ? "Complete occurrence" : a.name === "start_focus_session" ? "Start timer" : "Remember preference"}</button><button disabled={busy || !online} onClick={() => void decide(a, false)}>Cancel</button></div> : <p>{a.status}</p>}</section>)}
     <form className="stack compact" onSubmit={e => { e.preventDefault(); void send(); }}><label>Message<textarea value={content} onChange={e => setContent(e.target.value)} maxLength={8000} rows={3} placeholder="Help me plan my day..." disabled={sending} /></label><div className="row">
       <button type="button" disabled={busy || !online} onClick={() => current ? void select(current.id) : void load()}><RefreshCw /> Refresh history</button>
       {voiceAvailable && <button type="button" disabled={busy || !online} onClick={voice}><Mic />{listening ? "Stop dictation" : "Dictate"}</button>}
