@@ -15,12 +15,12 @@ export async function GET(request: NextRequest, context: { params: Promise<{ pat
   try {
     const response = await authorizedFetch("/" + path.join("/") + request.nextUrl.search, {
       method: request.method,
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", "Accept": request.headers.get("Accept") || "application/json" },
       ...(request.method !== "GET" ? { body: await request.text() } : {}),
     });
-    return new Response(await response.text(), {
+    return new Response(response.headers.get("Content-Type")?.includes("text/event-stream") ? response.body : await response.text(), {
       status: response.status,
-      headers: { "Content-Type": "application/json", "Cache-Control": "no-store" },
+      headers: { "Content-Type": response.headers.get("Content-Type") || "application/json", "Cache-Control": "no-store", ...(response.headers.get("Retry-After") ? { "Retry-After": response.headers.get("Retry-After")! } : {}) },
     });
   } catch {
     return NextResponse.json({ detail: "The service is unavailable. Please try again shortly." }, { status: 502 });

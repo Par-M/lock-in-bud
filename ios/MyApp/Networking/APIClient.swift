@@ -35,6 +35,51 @@ final class APIClient {
         try await send(endpoint)
     }
 
+    @MainActor
+    func streamChat(_ endpoint: Endpoint, onText: @escaping @MainActor (String) -> Void) async throws -> ChatSendResponse {
+        try await streamChatAttempt(endpoint, onText: onText, didRetry: false)
+    }
+
+    @MainActor
+    private func streamChatAttempt(_ endpoint: Endpoint, onText: @escaping @MainActor (String) -> Void, didRetry: Bool) async throws -> ChatSendResponse {
+        let owner = userID
+        var request = try makeRequest(endpoint)
+        request.setValue("text/event-stream", forHTTPHeaderField: "Accept")
+        let (bytes, response) = try await URLSession.shared.bytes(for: request)
+        guard let http = response as? HTTPURLResponse else { throw NetworkError.invalidResponse }
+        if http.statusCode == 401, !didRetry, owner == userID {
+            _ = try await refreshSession()
+            guard owner == userID else { throw NetworkError.unauthorized }
+            return try await streamChatAttempt(endpoint, onText: onText, didRetry: true)
+        }
+        guard (200..<300).contains(http.statusCode) else {
+            var data = Data()
+            for try await byte in bytes { data.append(byte); if data.count > 16000 { break } }
+            throw NetworkError.response(status: http.statusCode, data: data)
+        }
+        if !(http.value(forHTTPHeaderField: "Content-Type") ?? "").contains("text/event-stream") {
+            var data = Data()
+            for try await byte in bytes { data.append(byte) }
+            return try JSONCoding.decoder.decode(ChatSendResponse.self, from: data)
+        }
+        var partial = ""
+        for try await line in bytes.lines {
+            try Task.checkCancellation()
+            guard userID == owner else { throw NetworkError.unauthorized }
+            guard line.hasPrefix("data:") else { continue }
+            let data = Data(line.dropFirst(5).utf8)
+            let event = try JSONCoding.decoder.decode(ChatStreamEvent.self, from: data)
+            switch event.type {
+            case "delta": partial += event.text ?? ""; onText(partial)
+            case "tool_status": partial = ""; onText("")
+            case "complete": if let result = event.result { return result }
+            case "error": throw NetworkError.serverError(status: 502, detail: event.detail ?? "The assistant is unavailable.")
+            default: break
+            }
+        }
+        throw NetworkError.serverError(status: 502, detail: "The connection ended before the reply was saved. Your draft was kept.")
+    }
+
     private func send<T: Decodable>(_ endpoint: Endpoint, didRetry: Bool = false) async throws -> T {
         let requestUserID = userID
         let urlRequest = try makeRequest(endpoint)

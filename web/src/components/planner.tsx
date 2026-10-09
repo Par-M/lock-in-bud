@@ -20,21 +20,14 @@ import {
   Pencil,
   Trash2,
 } from "lucide-react";
+import { Assistant } from "@/components/assistant";
+import { Sheet } from "@/components/sheet";
 import { api } from "@/lib/api";
 import { offlineTasksChangedEvent } from "@/lib/offline";
 import { NotificationPreferences } from "@/components/notification-preferences";
 import { CalendarAvailability, availabilityCovers, emptyCalendarAvailability } from "@/components/calendar-availability";
 import { ScheduleProposals } from "@/components/schedule-proposals";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { Bubble, BubbleContent } from "@/components/ui/bubble";
-import { Message, MessageAvatar, MessageContent } from "@/components/ui/message";
-import {
-  MessageScroller,
-  MessageScrollerProvider,
-  MessageScrollerViewport,
-  MessageScrollerContent,
-  MessageScrollerItem,
-} from "@/components/ui/message-scroller";
+
 
 type Task = {
   id: string;
@@ -224,39 +217,6 @@ function fixedEventsForDay(tasks: Task[], blocks: Block[], day: Date) {
   });
 }
 
-function Sheet({ title, onClose, children }: { title: string; onClose: () => void; children: ReactNode }) {
-  const ref = useRef<HTMLDialogElement>(null);
-  useEffect(() => {
-    const dialog = ref.current;
-    dialog?.showModal();
-    return () => dialog?.close();
-  }, []);
-  return (
-    <dialog
-      ref={ref}
-      className="sheet"
-      aria-label={title}
-      onCancel={(event) => {
-        event.preventDefault();
-        onClose();
-      }}
-      onClick={(event) => {
-        if (event.target === event.currentTarget) {
-          const box = event.currentTarget.getBoundingClientRect();
-          if (event.clientX < box.left || event.clientX > box.right || event.clientY < box.top || event.clientY > box.bottom) onClose();
-        }
-      }}
-    >
-      <div className="sheet-heading">
-        <h2>{title}</h2>
-        <button type="button" className="icon-button" aria-label={`Close ${title}`} onClick={onClose}>
-          <X />
-        </button>
-      </div>
-      {children}
-    </dialog>
-  );
-}
 
 function RepeatDays({ value, onChange }: { value: number[]; onChange: (days: number[]) => void }) {
   return (
@@ -503,170 +463,6 @@ function HabitForm({ onSave, busy, habit }: { onSave: (body: unknown) => void; b
   );
 }
 
-type ChatMessage = { id: string; role: string; content: string | null };
-type Conversation = {
-  id: string;
-  title: string | null;
-  messages?: ChatMessage[] | null;
-};
-function Assistant({ onClose }: { onClose: () => void }) {
-  const [conversations, setConversations] = useState<Conversation[]>([]);
-  const [current, setCurrent] = useState<Conversation | null>(null);
-  const [content, setContent] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
-  const sequence = useRef(0);
-  async function load() {
-    setBusy(true);
-    setError("");
-    try {
-      setConversations(await api<Conversation[]>("/chat/conversations"));
-    } catch (e) {
-      setError(errorText(e));
-    } finally {
-      setBusy(false);
-    }
-  }
-  useEffect(() => {
-    void load();
-  }, []);
-  async function select(id: string) {
-    const token = ++sequence.current;
-    setBusy(true);
-    setError("");
-    try {
-      const result = await api<Conversation>(`/chat/conversations/${id}`);
-      if (token === sequence.current) setCurrent(result);
-    } catch (e) {
-      if (token === sequence.current) setError(errorText(e));
-    } finally {
-      if (token === sequence.current) setBusy(false);
-    }
-  }
-  async function create() {
-    setBusy(true);
-    setError("");
-    try {
-      const result = await api<Conversation>("/chat/conversations", request("POST", {}));
-      setConversations((v) => [result, ...v]);
-      setCurrent({ ...result, messages: [] });
-      setContent("");
-    } catch (e) {
-      setError(errorText(e));
-    } finally {
-      setBusy(false);
-    }
-  }
-  async function send(event: FormEvent) {
-    event.preventDefault();
-    if (!current || !content.trim() || busy) return;
-    setBusy(true);
-    setError("");
-    try {
-      const result = await api<{
-        message: ChatMessage;
-        assistant_message: ChatMessage;
-      }>(`/chat/conversations/${current.id}/messages`, request("POST", { content: content.trim() }));
-      setCurrent({
-        ...current,
-        messages: [...(current.messages || []), result.message, result.assistant_message],
-      });
-      setContent("");
-    } catch (e) {
-      setError(`${errorText(e)} Your message is preserved. Reload this conversation before retrying to check whether it was saved.`);
-    } finally {
-      setBusy(false);
-    }
-  }
-  return (
-    <Sheet title="Planner assistant" onClose={onClose}>
-      <div className="stack">
-        <p className="muted">
-          Talk through your day. The assistant is currently chat-only: it offers advice but cannot create, edit, or complete planner items.
-        </p>
-        <div className="row">
-          <label className="grow">
-            Conversation
-            <select
-              value={current?.id || ""}
-              disabled={busy}
-              onChange={(event) => {
-                if (event.target.value) void select(event.target.value);
-              }}
-            >
-              <option value="">Choose a conversation</option>
-              {conversations.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.title || "Untitled conversation"}
-                </option>
-              ))}
-            </select>
-          </label>
-          <button disabled={busy} onClick={() => void create()}>
-            <Plus /> New
-          </button>
-        </div>
-        {error && (
-          <div className="error" role="alert">
-            {error}
-            <button disabled={busy} onClick={() => (current ? void select(current.id) : void load())}>
-              Reload history
-            </button>
-          </div>
-        )}
-        <MessageScrollerProvider key={current?.id || "empty"} defaultScrollPosition="end">
-          <MessageScroller>
-            <MessageScrollerViewport aria-label="Conversation messages">
-              <MessageScrollerContent aria-live="polite">
-                {!current && <p className="empty">Start a conversation or choose one from your history.</p>}
-                {current?.messages
-                  ?.filter((m) => m.content && (m.role === "user" || m.role === "assistant"))
-                  .map((m) => (
-                    <MessageScrollerItem key={m.id} messageId={m.id}>
-                      <Message align={m.role === "user" ? "end" : "start"} role="article" aria-label={m.role === "user" ? "You" : "Assistant"}>
-                        <MessageAvatar aria-hidden="true">
-                          <Avatar>
-                            <AvatarFallback>{m.role === "user" ? "Y" : "A"}</AvatarFallback>
-                          </Avatar>
-                        </MessageAvatar>
-                        <MessageContent>
-                          <Bubble>
-                            <BubbleContent>{m.content || ""}</BubbleContent>
-                          </Bubble>
-                        </MessageContent>
-                      </Message>
-                    </MessageScrollerItem>
-                  ))}
-                {busy && <p role="status">Loading...</p>}
-              </MessageScrollerContent>
-            </MessageScrollerViewport>
-          </MessageScroller>
-        </MessageScrollerProvider>
-        <form onSubmit={send} className="stack compact">
-          <label>
-            Message
-            <textarea
-              value={content}
-              onChange={(event) => setContent(event.target.value)}
-              maxLength={8000}
-              rows={3}
-              placeholder="Help me plan my day..."
-              disabled={!current}
-            />
-          </label>
-          <div className="row">
-            <button type="button" disabled={!current || busy} onClick={() => current && void select(current.id)}>
-              <RefreshCw /> Refresh history
-            </button>
-            <button className="primary" disabled={!current || busy || !content.trim()}>
-              {busy ? "Working..." : "Send message"}
-            </button>
-          </div>
-        </form>
-      </div>
-    </Sheet>
-  );
-}
 
 type Preferences = {
   work_hours_start: number;
@@ -2505,7 +2301,9 @@ export default function Planner({ user, onLogout }: { user: { id: string; name: 
           </div>
         </Sheet>
       )}
-      {sheet === "assistant" && <Assistant onClose={() => setSheet(null)} />}
+      {sheet === "assistant" && <Assistant userId={user.id} onClose={() => setSheet(null)}
+        onTask={(id) => { void act(async () => { const task = await api<Task>(`/tasks/${id}`); setEditing(task); setSheet("task"); }); }}
+        onChanged={() => setReload(v => v + 1)} onStartFocus={(id) => { startFocus(id || ""); setSheet(null); }} />}
     </div>
   );
 }

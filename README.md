@@ -211,3 +211,11 @@ The backend deploys to **Vercel** (project `lock-in-bud`) as a serverless functi
 
 - `backend/api/index.py` runs `alembic upgrade head` on cold start, so migrations apply automatically before requests are served.
 - Live URL: `https://lock-in-bud.vercel.app`
+
+## Planner assistant
+
+The web and iOS assistants read your planner, stream replies and propose task
+changes for explicit confirmation. They support conversation management, safe
+retries, task references, offline history and confirmed planner preferences.
+See [assistant architecture and deployment](docs/assistant.md). Apply the new
+`20261009110000` migration before deploying this backend version.

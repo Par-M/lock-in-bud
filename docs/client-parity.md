@@ -13,7 +13,7 @@ remaining gaps; it is not a claim that every platform capability is identical.
 | Schedule | Daily advice, stored proposal generation/review, item acceptance/redo, accept-all/reject, blocks, occurrence edits, reschedule/snooze |
 | Habits | Create/edit/delete, reorder, daily counts, complete/reset, streaks and history |
 | Focus | Persistent task/free timers, category attribution, range-filtered history, edit/delete, category totals |
-| Assistant | Conversation creation/history, refresh, failed-draft preservation, text responses only |
+| Assistant | Conversation creation/history/rename/delete, streaming, live planner context, read tools, confirmed actions, safe retries, offline history, citations and remembered preferences |
 | Preferences | Work hours, buffers, default task settings, notification preferences, appearance and category suggestions |
 | Authentication | Native/web OAuth allowlist, refresh, current-session logout, transient-error handling |
 | Reliability | Account-isolated focus state, stable focus-save IDs, atomic whole-minute recording, durable local task mutations |

@@ -1,0 +1,28 @@
+name: iOS CI
+on:
+  push:
+  pull_request:
+
+jobs:
+  ios:
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v4
+      - name: Choose an installed iPhone simulator
+        run: |
+          xcrun simctl list devices available -j > /tmp/simulators.json
+          python3 - <<'PY' >> "$GITHUB_ENV"
+          import json
+          devices = json.load(open('/tmp/simulators.json'))['devices']
+          phones = [device for runtime, group in sorted(devices.items(), reverse=True)
+                    if 'iOS' in runtime for device in group if device['name'].startswith('iPhone')]
+          if not phones:
+              raise SystemExit('No iPhone simulator installed')
+          print('TEST_SIMULATOR=' + phones[0]['udid'])
+          PY
+      - name: Build app and run isolated unit tests
+        run: >-
+          xcodebuild test -project ios/MyApp.xcodeproj -scheme MyApp
+          -destination "platform=iOS Simulator,id=$TEST_SIMULATOR"
+          -only-testing:MyAppTests -derivedDataPath /tmp/client-tests
+          CODE_SIGNING_ALLOWED=NO

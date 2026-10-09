@@ -97,7 +97,9 @@ export async function initializeOfflineAccount(user: OfflineUser) {
 
 export async function restoredOfflineAccount() { return storage<OfflineUser>("identity"); }
 export async function clearOfflineAccount() {
+  const previous = account;
   account = null; generation++; lastError = ""; publish();
+  if (previous) await storage(`assistant:${previous}`, undefined, true);
   await storage("identity", undefined, true);
 }
 
@@ -356,4 +358,16 @@ export async function taskRequest<T>(path: string, options: RequestInit = {}): P
     publish(state);
     return (method === "DELETE" ? null : localTasks(state)[id]) as T;
   });
+}
+
+// Assistant history is a read-only snapshot, never a task-outbox operation.
+export async function readAssistantHistory<T>(userId: string): Promise<T | undefined> {
+  if (account !== userId) return undefined;
+  return storage<T>(`assistant:${userId}`);
+}
+export async function cacheAssistantHistory<T>(userId: string, history: T): Promise<void> {
+  if (account === userId) await storage(`assistant:${userId}`, history);
+}
+export async function removeAssistantHistory(userId: string): Promise<void> {
+  await storage(`assistant:${userId}`, undefined, true);
 }

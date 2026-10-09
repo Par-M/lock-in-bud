@@ -92,7 +92,7 @@ test("assistant messages preserve text, sender alignment, and mocked send flow",
   await input.fill("  What next?  ");
   await dialog.getByRole("button", { name: "Send message", exact: true }).click();
   await expect(messages).toHaveCount(4);
-  expect(sent).toEqual([{ content: "What next?" }]);
+  expect(sent).toEqual([expect.objectContaining({ content: "What next?", timezone: expect.any(String), request_id: expect.any(String) })]);
   await expect(input).toHaveValue("");
   expect(await messages.nth(3).locator('[data-slot="bubble-content"]').textContent()).toBe(reply);
   await expect(dialog.getByRole("button", { name: "Send message", exact: true })).toBeDisabled();
