@@ -10,6 +10,7 @@ struct ChatView: View {
     @State private var renameTitle = ""
     @State private var renaming = false
     @State private var deleting = false
+    @State private var showingHistory = false
     @State private var citedTask: TaskItem?
     @FocusState private var isFocused: Bool
     private let suggestions = ["What's my plan today?", "What's overdue?", "What can I focus on right now?"]
@@ -89,18 +90,8 @@ struct ChatView: View {
             .navigationTitle("Assistant").navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
-                    Menu {
-                        ForEach(chatService.conversations) { conversation in
-                            Button(conversation.title ?? "Untitled conversation") {
-                                Task {
-                                    isSwitchingConversation = true; defer { isSwitchingConversation = false }
-                                    rememberDraft(); await chatService.loadConversation(conversation.id)
-                                    if chatService.currentConversation?.id == conversation.id { input = drafts[conversation.id] ?? "" }
-                                }
-                            }
-                        }
-                    } label: { Label("History", systemImage: "clock.arrow.circlepath") }
-                    .disabled(chatService.isSending || isSwitchingConversation || !chatService.isOnline)
+                    Button { showingHistory = true } label: { Label("History", systemImage: "clock.arrow.circlepath") }
+                        .disabled(chatService.isSending || isSwitchingConversation || !chatService.isOnline)
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Menu {
@@ -126,6 +117,37 @@ struct ChatView: View {
                 Button("Delete", role: .destructive) { Task { await chatService.deleteCurrent(); input = "" } }
             }
             .sheet(item: $citedTask) { task in NavigationStack { TaskDetailView(task: task) } }
+            .sheet(isPresented: $showingHistory) {
+                NavigationStack {
+                    List {
+                        ForEach(chatService.conversations) { conversation in
+                            Button {
+                                Task {
+                                    isSwitchingConversation = true; defer { isSwitchingConversation = false }
+                                    rememberDraft(); await chatService.loadConversation(conversation.id)
+                                    if chatService.currentConversation?.id == conversation.id { input = drafts[conversation.id] ?? "" }
+                                    showingHistory = false
+                                }
+                            } label: {
+                                HStack {
+                                    Text(conversation.title ?? "Untitled conversation")
+                                    Spacer()
+                                    if chatService.currentConversation?.id == conversation.id {
+                                        Image(systemName: "checkmark").foregroundStyle(.tint)
+                                    }
+                                }
+                            }
+                            .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                                Button(role: .destructive) {
+                                    Task { await chatService.deleteConversation(conversation.id) }
+                                } label: { Label("Delete", systemImage: "trash") }
+                            }
+                        }
+                    }
+                    .navigationTitle("Conversations").navigationBarTitleDisplayMode(.inline)
+                    .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { showingHistory = false } } }
+                }
+            }
             .task {
                 await chatService.loadConversations(); await chatService.loadMemory()
                 if chatService.currentConversation == nil, let first = chatService.conversations.first { await chatService.loadConversation(first.id) }

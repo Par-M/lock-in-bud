@@ -33,9 +33,6 @@ struct TaskFormView: View {
     @State private var category: String
     @State private var notes: String
     @State private var checklist: [ChecklistItem]
-    @State private var beforeTaskIDs: Set<UUID>
-    @State private var afterTaskIDs: Set<UUID>
-    @State private var isOrderingExpanded: Bool
     @State private var moreOptions = false
     @State private var isSaving = false
     @State private var errorMessage: String?
@@ -68,9 +65,6 @@ struct TaskFormView: View {
             _category = State(initialValue: "")
             _notes = State(initialValue: "")
             _checklist = State(initialValue: [])
-            _beforeTaskIDs = State(initialValue: [])
-            _afterTaskIDs = State(initialValue: [])
-            _isOrderingExpanded = State(initialValue: false)
         case .edit(let task):
             _title = State(initialValue: task.title)
             _detail = State(initialValue: task.description ?? "")
@@ -99,9 +93,6 @@ struct TaskFormView: View {
             _category = State(initialValue: task.category ?? "")
             _notes = State(initialValue: task.notes ?? "")
             _checklist = State(initialValue: task.checklist ?? [])
-            _beforeTaskIDs = State(initialValue: Set(task.beforeTaskIds ?? []))
-            _afterTaskIDs = State(initialValue: Set(task.afterTaskIds ?? []))
-            _isOrderingExpanded = State(initialValue: true)
         }
     }
 
@@ -169,19 +160,6 @@ struct TaskFormView: View {
         return repeatEndDate
     }
 
-    private var selfTaskID: UUID? {
-        if case .edit(let task) = mode {
-            return task.id
-        }
-        return nil
-    }
-
-    private var candidateTasks: [TaskItem] {
-        taskService.tasks.filter {
-            $0.id != selfTaskID && $0.status != .completed
-        }
-    }
-
     private var categorySuggestions: [String] {
         guard !category.isEmpty else { return [] }
         return Array(
@@ -213,45 +191,6 @@ struct TaskFormView: View {
         .accessibilityLabel(Self.weekdayFullNames[day])
         .accessibilityValue(isSelected ? "Selected" : "Not selected")
         .accessibilityIdentifier("repeatDay\(day)")
-    }
-
-    @ViewBuilder
-    private func orderingList(title: String, selection: Binding<Set<UUID>>) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(title)
-                .font(.subheadline.weight(.medium))
-                .foregroundStyle(.secondary)
-            ForEach(orderedCandidates) { task in
-                let isSelected = selection.wrappedValue.contains(task.id)
-                Button {
-                    if isSelected {
-                        selection.wrappedValue.remove(task.id)
-                    } else {
-                        selection.wrappedValue.insert(task.id)
-                    }
-                } label: {
-                    HStack {
-                        Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
-                            .foregroundStyle(isSelected ? Color.accentColor : Color.secondary)
-                        Text(task.title)
-                            .foregroundStyle(.primary)
-                            .lineLimit(1)
-                        Spacer()
-                    }
-                    .padding(.vertical, 6)
-                }
-                .buttonStyle(.plain)
-                .accessibilityIdentifier("ordering_\(title)_\(task.id)")
-            }
-        }
-    }
-
-    private var orderedCandidates: [TaskItem] {
-        candidateTasks.sorted {
-            let lhsDeadline = $0.deadline ?? $0.createdAt
-            let rhsDeadline = $1.deadline ?? $1.createdAt
-            return lhsDeadline < rhsDeadline
-        }
     }
 
     var body: some View {
@@ -338,7 +277,6 @@ struct TaskFormView: View {
                 }
                 DisclosureGroup("More options", isExpanded: $moreOptions) {
                     Picker("Priority", selection: $priority) { ForEach(TaskPriority.allCases) { value in Text(value.label).tag(value) } }
-                    TextField("Description", text: $detail, axis: .vertical).lineLimit(2...5)
                     Toggle("Repeats", isOn: $hasRepeat)
                     if hasRepeat {
                         LazyVGrid(columns: [GridItem(.adaptive(minimum: 44))], spacing: 8) {
@@ -358,14 +296,6 @@ struct TaskFormView: View {
                             )
                         }
                     }
-                if !candidateTasks.isEmpty {
-                    Section("Ordering", isExpanded: $isOrderingExpanded) {
-                        VStack(alignment: .leading, spacing: 12) {
-                            orderingList(title: "Do before", selection: $beforeTaskIDs)
-                            orderingList(title: "Do after", selection: $afterTaskIDs)
-                        }
-                    }
-                }
 
                 if case .edit = mode {
                 Section {
@@ -490,8 +420,6 @@ struct TaskFormView: View {
         let checklistValue = checklist.isEmpty ? nil : checklist
         let repeatWeekdaysValue = hasRepeat ? selectedWeekdaysValue : nil
         let repeatEndsOnValue = repeatEndsOnValue
-        let beforeTaskIdsValue = beforeTaskIDs.isEmpty ? nil : Array(beforeTaskIDs)
-        let afterTaskIdsValue = afterTaskIDs.isEmpty ? nil : Array(afterTaskIDs)
 
         do {
             switch mode {
@@ -508,8 +436,8 @@ struct TaskFormView: View {
                     category: categoryValue,
                     notes: notesValue,
                     repeatWeekdays: repeatWeekdaysValue,
-                    beforeTaskIds: beforeTaskIdsValue,
-                    afterTaskIds: afterTaskIdsValue,
+                    beforeTaskIds: nil,
+                    afterTaskIds: nil,
                     repeatEndsOn: repeatEndsOnValue,
                     checklist: checklistValue
                 )
@@ -529,8 +457,6 @@ struct TaskFormView: View {
                 updated.checklist = checklistValue
                 updated.repeatWeekdays = repeatWeekdaysValue
                 updated.repeatEndsOn = repeatEndsOnValue
-                updated.beforeTaskIds = beforeTaskIdsValue
-                updated.afterTaskIds = afterTaskIdsValue
                 let saved = try await taskService.updateTask(updated)
                 onSaved?(saved)
             }

@@ -201,7 +201,6 @@ class SchedulingService:
             for task in tasks
         }
         tasks = [task for task in tasks if remaining[task.id] > 0]
-        by_id = {task.id: task for task in tasks}
         context = SchedulingContext(
             tasks=[
                 TaskContext(
@@ -215,16 +214,6 @@ class SchedulingService:
                     energy_level=preference.energy_level,
                     start_at=task.start_at,
                     end_at=task.end_at,
-                    before_task_titles=tuple(
-                        by_id[t].title
-                        for t in (task.before_task_ids or [])
-                        if t in by_id
-                    ),
-                    after_task_titles=tuple(
-                        by_id[t].title
-                        for t in (task.after_task_ids or [])
-                        if t in by_id
-                    ),
                     is_overdue=(
                         task.deadline is not None and task.deadline < now
                     ),

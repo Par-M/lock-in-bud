@@ -288,7 +288,7 @@ function TaskForm({ task, onSave, busy }: { task: Task | null; onSave: (body: Re
     setValidationError("");
     onSave({
       title: String(data.get("title")).trim(),
-      description: data.get("description") || null,
+      description: task ? task.description : null,
       priority: data.get("priority"),
       status: data.get("status"),
       estimated_duration: data.get("estimated_duration") ? Number(data.get("estimated_duration")) : null,
@@ -329,10 +329,6 @@ function TaskForm({ task, onSave, busy }: { task: Task | null; onSave: (body: Re
       <div className="form-grid"><label>Priority<select name="priority" defaultValue={task?.priority || defaults?.default_priority || "medium"}><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option></select></label>
       {task ? <><label>Status<select name="status" defaultValue={task.status}><option value="pending">Pending</option><option value="in_progress">In progress</option><option value="completed">Completed (entire task)</option></select></label><label>Actual minutes<input name="actual_duration" type="number" min={0} max={525600} defaultValue={task.actual_duration ?? ""} /></label><p className="muted small">Time tracked does not mark the task complete. Focus history is unchanged.</p></> : <input type="hidden" name="status" value="pending" />}
       <label>Category<input name="category" list="planner-categories" maxLength={100} defaultValue={task?.category || ""} /></label></div>
-      <label>
-        Description
-        <textarea name="description" defaultValue={task?.description || ""} rows={2} />
-      </label>
       <label>
         Notes
         <textarea name="notes" defaultValue={task?.notes || ""} rows={3} />
