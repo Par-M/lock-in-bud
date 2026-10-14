@@ -47,6 +47,7 @@ struct FocusDashboardView: View {
 
     @State private var range: RangeOption = .week
     @State private var showingStats = false
+    @State private var confirmStop = false
     @State private var pendingSessionStop: SessionStop?
     @AppStorage("focusTimerStartedAt") private var timerStartedAtRef = 0.0
     @AppStorage("focusTimerPausedAt") private var pausedAt = 0.0
@@ -73,6 +74,9 @@ struct FocusDashboardView: View {
 
                     timerCard
 
+                    NavigationLink("Focus Lock", destination: FocusLockView())
+                        .buttonStyle(.bordered)
+                    if let issue = FocusLockService.shared.issue { Text(issue).font(.footnote).foregroundStyle(.orange) }
                     statsButton
                     ChatButton()
 
@@ -90,6 +94,9 @@ struct FocusDashboardView: View {
                     }
                     .accessibilityIdentifier("refreshFocusButton")
                 }
+            }
+            .confirmationDialog("End this strict focus session and release blocked apps?", isPresented: $confirmStop, titleVisibility: .visible) {
+                Button("End session", role: .destructive) { stopTimer() }
             }
             .sheet(isPresented: $showingStats) {
                 FocusStatsView()
@@ -146,7 +153,7 @@ struct FocusDashboardView: View {
 
                 Button(pausedAt > 0 ? "Resume" : "Pause", systemImage: pausedAt > 0 ? "play.fill" : "pause.fill") { FocusTimerStarter.togglePause() }.buttonStyle(.bordered)
                 Button(role: .destructive) {
-                    stopTimer()
+                    if FocusLockService.shared.session?.strict == true { confirmStop = true } else { stopTimer() }
                 } label: {
                     Label("Stop & log session", systemImage: "stop.fill")
                         .frame(maxWidth: .infinity)
@@ -209,6 +216,7 @@ struct FocusDashboardView: View {
         guard let started = timerStartedAt else { return }
         let ended = Date()
         let trackedSeconds = max(1, FocusTimerStarter.elapsedSeconds())
+        FocusLockService.shared.end()
         timerStartedAtRef = 0
         WidgetDataStore.writeFocus(startedAt: 0)
         WidgetCenter.shared.reloadTimelines(ofKind: "FocusTimerWidget")

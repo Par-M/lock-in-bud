@@ -15,6 +15,7 @@ enum FocusTimerStarter {
         let owner = userID?.uuidString
         let defaults = UserDefaults.standard
         guard defaults.string(forKey: ownerKey) != owner || (userID == nil && startedAt > 0) else { return }
+        FocusLockService.shared.resetAccount()
         defaults.removeObject(forKey: pausedAtKey)
         defaults.removeObject(forKey: pausedSecondsKey)
         defaults.removeObject(forKey: startedAtKey)
@@ -83,6 +84,7 @@ enum FocusTimerStarter {
             defaults.removeObject(forKey: activeCategoryKey)
         }
 
+        FocusLockService.shared.start()
         WidgetDataStore.writeFocus(startedAt: startedAt, title: title ?? "Deep Work Session")
         WidgetCenter.shared.reloadTimelines(ofKind: "FocusTimerWidget")
 

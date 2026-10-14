@@ -74,6 +74,7 @@ struct MyAppApp: App {
                 }
                 .onChange(of: scenePhase) { _, newPhase in
                     guard newPhase == .active else { return }
+                    FocusLockService.shared.refresh()
                     Task {
                         // The access token is short-lived, so returning to the
                         // app after a while needs a silent revalidation.
