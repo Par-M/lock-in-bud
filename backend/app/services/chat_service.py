@@ -48,7 +48,7 @@ Registered tools:
 - get_today_plan()
 - get_focus_summary(days)
 - get_habits()
-- create_task(title, description, estimated_duration_minutes, priority, deadline, category)
+- create_task(title, estimated_duration_minutes, priority, deadline, category)
 - complete_task(task_id, occurrence_date)
 - start_focus_session(task_id)
 - remember_fact(fact)
@@ -174,7 +174,7 @@ class ChatService:
             tool("get_focus_summary", "Read actual logged focus time without invoking another model.", {"days": {"type": "integer", "minimum": 1, "maximum": 30}}),
             tool("get_habits", "Read habit progress today."),
             tool("create_task", "Propose a task. Requires human confirmation.", {
-                "title": string, "description": string, "estimated_duration_minutes": {"type": "integer"},
+                "title": string, "estimated_duration_minutes": {"type": "integer"},
                 "priority": {"type": "string", "enum": ["low", "medium", "high"]}, "deadline": string, "category": string}, ["title"]),
             tool("complete_task", "Propose completing a task or one repeating occurrence. Requires confirmation.", {"task_id": string, "occurrence_date": string}, ["task_id"]),
             tool("start_focus_session", "Propose starting this device's focus timer. Requires confirmation; no work time is logged yet.", {"task_id": string}),

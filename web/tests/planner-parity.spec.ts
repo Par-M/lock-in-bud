@@ -285,7 +285,7 @@ test("task sort fields and both directions reach the backend", async ({ page }) 
   await expect.poll(() => queries.some((q) => q.includes("sort=category&order=asc"))).toBe(true);
 });
 
-test("task edit errors keep unsaved actual minutes and description", async ({ page }) => {
+test("task edit errors keep unsaved actual minutes and notes", async ({ page }) => {
   await mock(page);
   await page.route("**/api/backend/tasks/task-1", (route) => route.fulfill({ status: 422, json: { detail: "Cannot update task" } }));
   await page.goto("/"); await page.getByRole("navigation").getByRole("button", { name: "Schedule", exact: true }).click();
@@ -294,11 +294,11 @@ test("task edit errors keep unsaved actual minutes and description", async ({ pa
   await page.getByRole("button", { name: "Edit Write report", exact: true }).click();
   const dialog = page.getByRole("dialog", { name: "Edit task", exact: true });
   await dialog.getByLabel("Actual minutes").fill("23");
-  await dialog.getByRole("textbox", { name: "Description", exact: true }).fill("Keep my text");
+  await dialog.getByRole("textbox", { name: "Notes", exact: true }).fill("Keep my text");
   await dialog.getByRole("button", { name: "Save changes", exact: true }).click();
   await expect(dialog.getByRole("alert")).toContainText("Cannot update task");
   await expect(dialog.getByLabel("Actual minutes")).toHaveValue("23");
-  await expect(dialog.getByRole("textbox", { name: "Description", exact: true })).toHaveValue("Keep my text");
+  await expect(dialog.getByRole("textbox", { name: "Notes", exact: true })).toHaveValue("Keep my text");
 });
 
 test("manual blocks create/edit and repeat occurrence scopes use exact contracts", async ({ page }) => {

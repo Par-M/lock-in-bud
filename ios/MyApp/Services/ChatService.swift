@@ -128,12 +128,19 @@ final class ChatService {
         } catch { errorMessage = error.localizedDescription }
     }
     func deleteCurrent() async {
-        guard let conv = currentConversation, !isSending, isOnline else { return }
+        guard let conv = currentConversation else { return }
+        await deleteConversation(conv.id)
+    }
+    func deleteConversation(_ id: UUID) async {
+        guard !isSending, isOnline else { return }
         let account = owner
         do {
-            let _: MessageResponse = try await client.request(ChatEndpoint.delete(conv.id))
+            let _: MessageResponse = try await client.request(ChatEndpoint.delete(id))
             guard client.userID == account else { synchronizeAccount(); return }
-            currentConversation = nil; messages = []; actions = []; failedDraft = nil; pendingRequest = nil
+            conversations.removeAll { $0.id == id }
+            if currentConversation?.id == id {
+                currentConversation = nil; messages = []; actions = []; failedDraft = nil; pendingRequest = nil
+            }
             await loadConversations()
         } catch { errorMessage = error.localizedDescription }
     }
