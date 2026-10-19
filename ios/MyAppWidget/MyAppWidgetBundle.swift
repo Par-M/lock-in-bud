@@ -7,5 +7,8 @@ struct MyAppWidgetBundle: WidgetBundle {
         CurrentTaskWidget()
         TasksRemainingWidget()
         FocusTimerWidget()
+        #if canImport(ActivityKit) && !targetEnvironment(macCatalyst)
+        FocusLiveActivity()
+        #endif
     }
 }
