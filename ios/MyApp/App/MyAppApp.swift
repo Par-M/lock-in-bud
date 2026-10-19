@@ -71,6 +71,7 @@ struct MyAppApp: App {
                 .preferredColorScheme(appearance.theme.colorScheme)
                 .task {
                     await authService.restoreSession()
+                    FocusLiveActivityManager.synchronize()
                 }
                 .onChange(of: scenePhase) { _, newPhase in
                     guard newPhase == .active else { return }
@@ -78,6 +79,7 @@ struct MyAppApp: App {
                         // The access token is short-lived, so returning to the
                         // app after a while needs a silent revalidation.
                         await authService.revalidateSession()
+                        FocusLiveActivityManager.synchronize()
                         // Replay any focus sessions that could not upload.
                         await focusService.flushPendingSessions()
                     }

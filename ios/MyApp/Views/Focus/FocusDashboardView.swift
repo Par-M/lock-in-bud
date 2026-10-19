@@ -72,6 +72,12 @@ struct FocusDashboardView: View {
                     }
 
                     timerCard
+                    if isTimerRunning, let message = FocusLiveActivityManager.shared.message {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text(message).font(.footnote).foregroundStyle(.secondary)
+                            Button("Try lock-screen timer") { FocusLiveActivityManager.synchronize() }
+                        }
+                    }
 
                     statsButton
                     ChatButton()
@@ -177,7 +183,7 @@ struct FocusDashboardView: View {
     }
 
     private func resumeTickerIfRunning() {
-        guard isTimerRunning, let started = timerStartedAt else { return }
+        guard isTimerRunning else { return }
         elapsedSeconds = FocusTimerStarter.elapsedSeconds()
         startTicker()
     }
@@ -210,22 +216,15 @@ struct FocusDashboardView: View {
         let ended = Date()
         let trackedSeconds = max(1, FocusTimerStarter.elapsedSeconds())
         timerStartedAtRef = 0
+        FocusLiveActivityManager.synchronize()
         WidgetDataStore.writeFocus(startedAt: 0)
         WidgetCenter.shared.reloadTimelines(ofKind: "FocusTimerWidget")
         if FocusTimerStarter.activeTaskID != nil {
             Task {
-                if #available(iOS 16.1, *) {
-                    await FocusLiveActivityManager.endLiveActivity(elapsedSeconds: elapsedSeconds)
-                }
                 await logSession(startedAt: started, endedAt: ended, category: nil, trackedSeconds: trackedSeconds)
             }
         } else {
             pendingSessionStop = SessionStop(startedAt: started, endedAt: ended, trackedSeconds: trackedSeconds)
-            Task {
-                if #available(iOS 16.1, *) {
-                    await FocusLiveActivityManager.endLiveActivity(elapsedSeconds: elapsedSeconds)
-                }
-            }
         }
     }
 

@@ -22,9 +22,7 @@ enum FocusTimerStarter {
         defaults.set(owner, forKey: ownerKey)
         WidgetDataStore.writeFocus(startedAt: 0)
         WidgetCenter.shared.reloadTimelines(ofKind: "FocusTimerWidget")
-        if #available(iOS 16.1, *) {
-            Task { await FocusLiveActivityManager.endLiveActivity(elapsedSeconds: 0) }
-        }
+        FocusLiveActivityManager.synchronize()
     }
 
     static var activeTaskID: UUID? {
@@ -86,9 +84,7 @@ enum FocusTimerStarter {
         WidgetDataStore.writeFocus(startedAt: startedAt, title: title ?? "Deep Work Session")
         WidgetCenter.shared.reloadTimelines(ofKind: "FocusTimerWidget")
 
-        if #available(iOS 16.1, *) {
-            FocusLiveActivityManager.startLiveActivity()
-        }
+        FocusLiveActivityManager.synchronize()
     }
 
     static var isPaused: Bool { UserDefaults.standard.double(forKey: pausedAtKey) > 0 }
@@ -109,14 +105,19 @@ enum FocusTimerStarter {
         } else { defaults.set(now, forKey: pausedAtKey) }
         WidgetDataStore.writeFocus(startedAt: isPaused ? 0 : now - Double(elapsedSeconds()), title: isPaused ? "Paused · " + (activeTaskTitle ?? "Focus session") : activeTaskTitle ?? "Focus session")
         WidgetCenter.shared.reloadTimelines(ofKind: "FocusTimerWidget")
-        if #available(iOS 16.1, *) {
-            let elapsed = elapsedSeconds()
-            let pausedNow = isPaused
-            Task {
-                await FocusLiveActivityManager.endLiveActivity(elapsedSeconds: elapsed)
-                if !pausedNow { FocusLiveActivityManager.startLiveActivity() }
-            }
-        }
+        FocusLiveActivityManager.synchronize()
+    }
+
+    static func lockScreenSnapshot(at now: Date = .now) -> FocusLockScreenSnapshot? {
+        guard startedAt > 0 else { return nil }
+        let elapsed = elapsedSeconds(at: now.timeIntervalSince1970)
+        return FocusLockScreenSnapshot(
+            sessionID: String(startedAt.bitPattern),
+            taskTitle: activeTaskTitle ?? "Focus session",
+            elapsedSeconds: elapsed,
+            isPaused: isPaused,
+            timerStartedAt: now.addingTimeInterval(-Double(elapsed))
+        )
     }
 
     static func clearActiveTask() {
