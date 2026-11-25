@@ -53,6 +53,25 @@ final class MyAppTests: XCTestCase {
         XCTAssertEqual(defaults.double(forKey: FocusTimerStarter.pausedSecondsKey), 0)
     }
 
+    func testLocalNotificationsAreQuietForTheEntireFocusSession() {
+        let defaults = UserDefaults.standard
+        let keys = [FocusTimerStarter.ownerKey, FocusTimerStarter.startedAtKey, FocusTimerStarter.pausedAtKey, FocusTimerStarter.pausedSecondsKey]
+        let original = keys.map { defaults.object(forKey: $0) }
+        defer { for (key, value) in zip(keys, original) { defaults.set(value, forKey: key) } }
+
+        defaults.removeObject(forKey: FocusTimerStarter.startedAtKey)
+        XCTAssertTrue(NotificationService.notificationsAllowed())
+
+        defaults.set(Date().timeIntervalSince1970, forKey: FocusTimerStarter.startedAtKey)
+        XCTAssertFalse(NotificationService.notificationsAllowed())
+
+        defaults.set(Date().timeIntervalSince1970 + 10, forKey: FocusTimerStarter.pausedAtKey)
+        XCTAssertFalse(NotificationService.notificationsAllowed(), "Paused time is still part of the focus session")
+
+        FocusTimerStarter.synchronizeAccount(UUID())
+        XCTAssertTrue(NotificationService.notificationsAllowed())
+    }
+
     func testCalendarPermissionHasFullAccessUsageDescription() {
         let description = Bundle.main.object(forInfoDictionaryKey: "NSCalendarsFullAccessUsageDescription") as? String
         XCTAssertFalse(description?.isEmpty ?? true, "Full calendar access needs a user-facing usage description")

@@ -6,7 +6,7 @@ New task forms show the title, deadline, and estimated time first. More options 
 
 Task lists group work by urgency. Start focus is the primary task action and changes pending tasks to in progress. Tracked time is displayed separately from completion; logging a session never automatically completes a task. Completing a repeating task applies to the current occurrence.
 
-Focus timers remain accessible across tabs. Pause persists across reloads and excludes paused time from logged duration. Stop and save uses the existing retry-safe session flow. Destructive actions use confirmations; completion and archive provide recovery where supported. Row-level feedback keeps unrelated tasks usable.
+Focus timers remain accessible across tabs. Pause persists across reloads and excludes paused time from logged duration. Local reminders are quiet for the whole session, including pauses: pending notifications are cleared when the timer starts and rebuilt when it stops. Stop and save uses the existing retry-safe session flow. Destructive actions use confirmations; completion and archive provide recovery where supported. Row-level feedback keeps unrelated tasks usable.
 
 The desktop web assistant opens beside the plan and becomes a modal on smaller screens. Proposed actions have specific confirmation labels. Schedule proposal summaries explain added blocks and preserve fixed events. iOS onboarding is shorter; calendar and notification permissions remain available when configuring those features in Settings.
 

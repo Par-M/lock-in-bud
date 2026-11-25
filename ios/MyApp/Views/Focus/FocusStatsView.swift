@@ -1,5 +1,69 @@
 import SwiftUI
 
+/// Frame-level colors for the Focus stats sheet (category swatches and tracks).
+private enum FocusStatsPalette {
+    static let track = Color(red: 228 / 255, green: 231 / 255, blue: 220 / 255)
+    static let progressTrack = Color(red: 237 / 255, green: 241 / 255, blue: 230 / 255)
+
+    private static let swatchNames: [String: String] = [
+        "elec 221": "elec-221-color",
+        "elec 226": "elec-226-color",
+        "elec 271": "elec-271-color",
+        "elec 231": "elec-231-color",
+        "law 204": "law-204-color",
+        "elec 290": "elec-290-color",
+        "health & well being": "health-well-being-color",
+        "technical projects": "technical-projects-color",
+        "qec": "qec-color"
+    ]
+
+    private static let categoryColors: [String: Color] = [
+        "elec 221": Color(red: 147 / 255, green: 185 / 255, blue: 103 / 255),
+        "elec 226": Color(red: 73 / 255, green: 113 / 255, blue: 71 / 255),
+        "elec 271": Color(red: 107 / 255, green: 130 / 255, blue: 100 / 255),
+        "elec 231": Color(red: 185 / 255, green: 141 / 255, blue: 72 / 255),
+        "law 204": Color(red: 105 / 255, green: 143 / 255, blue: 138 / 255),
+        "elec 290": Color(red: 125 / 255, green: 135 / 255, blue: 96 / 255),
+        "health & well being": Color(red: 101 / 255, green: 147 / 255, blue: 134 / 255),
+        "technical projects": Color(red: 163 / 255, green: 152 / 255, blue: 101 / 255),
+        "qec": Color(red: 113 / 255, green: 130 / 255, blue: 139 / 255)
+    ]
+
+    private static func key(_ category: String) -> String {
+        category.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    }
+
+    static func swatchName(for category: String) -> String? {
+        swatchNames[key(category)]
+    }
+
+    static func color(for category: String) -> Color {
+        categoryColors[key(category)] ?? FocusChartColors.color(for: category)
+    }
+}
+
+private struct FocusStatsRow: ViewModifier {
+    func body(content: Content) -> some View {
+        content
+            .listRowInsets(
+                EdgeInsets(
+                    top: 4,
+                    leading: DesignPalette.pagePadding,
+                    bottom: 4,
+                    trailing: DesignPalette.pagePadding
+                )
+            )
+            .listRowBackground(Color.clear)
+            .listRowSeparator(.hidden)
+    }
+}
+
+private extension View {
+    func focusStatsRow() -> some View {
+        modifier(FocusStatsRow())
+    }
+}
+
 struct FocusStatsView: View {
     @Environment(FocusService.self) private var focus
     @Environment(\.dismiss) private var dismiss
@@ -13,7 +77,7 @@ struct FocusStatsView: View {
         var id: String { rawValue }
     }
 
-    @State private var granularity: Granularity = .oneDay
+    @State private var granularity: Granularity = .fourWeeks
     @State private var editingSession: FocusSession?
     @State private var selectedCategory: String?
 
@@ -36,17 +100,40 @@ struct FocusStatsView: View {
                         .listRowBackground(Color.clear)
                     }
                 } else {
-                    Section("Category spread") {
-                        radarCard
-                            .id(granularity)
-                            .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
-                            .listRowBackground(Color.clear)
+                    Section {
+                        encouragementCard
+                            .focusStatsRow()
                     }
 
-                    Section("Sessions per category") {
+                    Section {
+                        categorySpreadHeading
+                            .focusStatsRow()
+                    }
+
+                    Section {
+                        radarCard
+                            .id(granularity)
+                            .focusStatsRow()
+                    }
+
+                    Section {
+                        categoryBreakdownCard
+                            .focusStatsRow()
+                    }
+
+                    Section {
                         sessionsPerCategoryCard
-                            .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
-                            .listRowBackground(Color.clear)
+                            .focusStatsRow()
+                    }
+
+                    Section {
+                        insightCard
+                            .focusStatsRow()
+                    }
+
+                    Section {
+                        footerNote
+                            .focusStatsRow()
                     }
 
                     Section {
@@ -58,7 +145,12 @@ struct FocusStatsView: View {
                             } label: {
                                 Label("Show all sessions", systemImage: "xmark.circle.fill")
                                     .font(.footnote)
+                                    .foregroundStyle(DesignPalette.primary)
+                                    .padding(.horizontal, 12)
+                                    .padding(.vertical, 8)
+                                    .background(DesignPalette.sage, in: Capsule())
                             }
+                            .buttonStyle(.plain)
                         }
                         ForEach(filteredSessions) { session in
                             Button {
@@ -66,78 +158,240 @@ struct FocusStatsView: View {
                             } label: {
                                 HStack(spacing: 8) {
                                     Circle()
-                                        .fill(FocusChartColors.color(for: session.category ?? "Uncategorized"))
+                                        .fill(FocusStatsPalette.color(for: session.category ?? "Uncategorized"))
                                         .frame(width: 10, height: 10)
                                     VStack(alignment: .leading, spacing: 2) {
                                         Text(Self.sessionFormatter.string(from: session.startedAt))
-                                            .font(.subheadline)
-                                            .foregroundStyle(.primary)
+                                            .font(DesignPalette.body(13).weight(.medium))
+                                            .foregroundStyle(DesignPalette.ink)
                                         Text(timeRange(for: session))
-                                            .font(.caption)
-                                            .foregroundStyle(.secondary)
+                                            .font(DesignPalette.body(11))
+                                            .foregroundStyle(DesignPalette.secondary)
                                     }
                                     Spacer()
                                     Text("\(session.durationSeconds / 60) min")
-                                        .font(.subheadline)
-                                        .foregroundStyle(.secondary)
+                                        .font(DesignPalette.body(13).weight(.medium))
+                                        .foregroundStyle(DesignPalette.secondary)
                                         .frame(minWidth: 56, alignment: .trailing)
                                 }
+                                .padding(14)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .background(DesignPalette.card, in: RoundedRectangle(cornerRadius: 15))
                             }
+                            .buttonStyle(.plain)
+                            .listRowInsets(
+                                EdgeInsets(
+                                    top: 4,
+                                    leading: DesignPalette.pagePadding,
+                                    bottom: 4,
+                                    trailing: DesignPalette.pagePadding
+                                )
+                            )
+                            .listRowBackground(Color.clear)
+                            .listRowSeparator(.hidden)
                             .accessibilityIdentifier("focusSessionRow")
                         }
                         .onDelete(perform: deleteSessions)
                     } header: {
                         Text(sessionSectionTitle)
+                            .font(DesignPalette.sectionTitle(15))
+                            .foregroundStyle(DesignPalette.ink)
+                            .textCase(nil)
                     }
                 }
             }
-            .listStyle(.insetGrouped)
-            .safeAreaInset(edge: .top, spacing: 8) {
-                if !sessions.isEmpty {
-                    Picker("Granularity", selection: Binding(
-                        get: { granularity },
-                        set: { newValue in
-                            withAnimation(.snappy(duration: 0.35)) {
-                                granularity = newValue
-                            }
-                        }
-                    )) {
-                        ForEach(Granularity.allCases) { option in
-                            Text(option.rawValue).tag(option)
-                        }
+            .listStyle(.plain)
+            .scrollContentBackground(.hidden)
+            .background(DesignPalette.background)
+            .safeAreaInset(edge: .top, spacing: 0) {
+                VStack(spacing: 20) {
+                    header
+                    if !sessions.isEmpty {
+                        rangePicker
                     }
-                    .pickerStyle(.segmented)
-                    .padding(.horizontal)
                 }
+                .padding(.horizontal, DesignPalette.pagePadding)
+                .padding(.top, 10)
+                .padding(.bottom, 12)
+                .background(DesignPalette.background)
             }
             .navigationTitle("Focus stats")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Done") { dismiss() }
-                }
-            }
+            .navigationBarHidden(true)
             .sheet(item: $editingSession) { session in
                 FocusSessionEditSheet(session: session)
             }
         }
         .presentationDetents([.large])
+        .appBackdrop()
     }
 
-private var filteredSessions: [FocusSession] {
-    guard let selectedCategory else { return sorted }
-    return sorted.filter {
-        ($0.category ?? "Uncategorized") == selectedCategory
+    private var header: some View {
+        AppHeader(eyebrow: "FOCUS STATS", title: "Proof you showed up.") {
+            Button {
+                dismiss()
+            } label: {
+                HStack(spacing: 0) {
+                    Image("close-icon-f8ad2de4")
+                        .renderingMode(.template)
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: 22, height: 22)
+                        .foregroundStyle(DesignPalette.primary)
+                    Text("Done")
+                        .frame(width: 0, height: 0)
+                        .opacity(0)
+                }
+                .frame(width: 44, height: 44)
+                .background(DesignPalette.card, in: RoundedRectangle(cornerRadius: 12))
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Done")
+            .accessibilityIdentifier("doneFocusStatsButton")
+        }
     }
-}
 
-private var sessionSectionTitle: String {
-    guard let selectedCategory else { return "All sessions" }
-    return "\(selectedCategory) sessions"
-}
+    private var rangePicker: some View {
+        HStack(spacing: 3) {
+            ForEach(Granularity.allCases) { option in
+                Button {
+                    withAnimation(.snappy(duration: 0.35)) {
+                        granularity = option
+                    }
+                } label: {
+                    Text(option.rawValue)
+                        .font(DesignPalette.body(9).weight(.bold))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
+                        .frame(maxWidth: .infinity, minHeight: 34)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(granularity == option ? .white : DesignPalette.secondary)
+                .background(
+                    granularity == option ? DesignPalette.primary : Color.clear,
+                    in: RoundedRectangle(cornerRadius: 11)
+                )
+                .accessibilityLabel("\(option.rawValue) range")
+                .accessibilityAddTraits(granularity == option ? .isSelected : [])
+            }
+        }
+        .padding(4)
+        .background(FocusStatsPalette.track, in: RoundedRectangle(cornerRadius: 12))
+        .accessibilityIdentifier("focusStatsGranularityPicker")
+    }
 
-private func deleteSessions(at offsets: IndexSet) {
-    let toDelete = offsets.map { filteredSessions[$0] }
+    // MARK: - Encouragement
+
+    private var encouragementCard: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .center, spacing: 10) {
+                VStack(alignment: .leading, spacing: 7) {
+                    Text("That’s solid work.")
+                        .font(.system(size: 23, weight: .heavy, design: .rounded))
+                        .foregroundStyle(DesignPalette.ink)
+                        .minimumScaleFactor(0.8)
+                    Text("Not bad for a species known for naps.")
+                        .font(DesignPalette.body(12))
+                        .foregroundStyle(DesignPalette.secondary)
+                        .minimumScaleFactor(0.8)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+                FocusStatsPanda()
+            }
+
+            HStack(alignment: .top, spacing: 16) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("\(sessionHighlight?.count ?? 0)")
+                        .font(.system(size: 28, weight: .heavy, design: .rounded))
+                        .foregroundStyle(DesignPalette.primary)
+                        .minimumScaleFactor(0.7)
+                    Text("\(sessionHighlight?.category ?? "No category") sessions")
+                        .font(DesignPalette.body(10).weight(.semibold))
+                        .foregroundStyle(DesignPalette.secondary)
+                        .lineLimit(2)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("\(formattedMinutes(timeHighlight?.minutes ?? 0)) min")
+                        .font(.system(size: 25, weight: .heavy, design: .rounded))
+                        .foregroundStyle(DesignPalette.ink)
+                        .minimumScaleFactor(0.7)
+                    Text("\(timeHighlight?.category ?? "No category") focus time")
+                        .font(DesignPalette.body(10).weight(.semibold))
+                        .foregroundStyle(DesignPalette.secondary)
+                        .lineLimit(2)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .padding(.top, 7)
+        }
+        .padding(20)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(DesignPalette.sage, in: RoundedRectangle(cornerRadius: 20))
+    }
+
+    private var sessionHighlight: CategoryTotal? {
+        perCategoryTotals.max { $0.count < $1.count }
+    }
+
+    private var timeHighlight: CategoryTotal? {
+        perCategoryTotals.first
+    }
+
+    private func formattedMinutes(_ minutes: Int) -> String {
+        minutes.formatted(.number)
+    }
+
+    private var categorySpreadHeading: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Text("Category spread")
+                .font(.system(size: 18, weight: .heavy, design: .rounded))
+                .foregroundStyle(DesignPalette.ink)
+            Text("A clearer picture of where your focus went.")
+                .font(DesignPalette.body(11))
+                .foregroundStyle(DesignPalette.secondary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var insightCard: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Slow is fine. Keep moving.")
+                .font(DesignPalette.body(14).weight(.bold))
+                .foregroundStyle(DesignPalette.ink)
+            Text("Focused minutes. Earned bamboo breaks.")
+                .font(DesignPalette.body(11))
+                .foregroundStyle(DesignPalette.secondary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(16)
+        .background(DesignPalette.cream, in: RoundedRectangle(cornerRadius: 20))
+    }
+
+    private var footerNote: some View {
+        Text("Less scrolling. More bamboo.")
+            .font(DesignPalette.body(10))
+            .foregroundStyle(DesignPalette.secondary)
+            .frame(maxWidth: .infinity, alignment: .center)
+            .padding(.vertical, 4)
+    }
+
+    private var filteredSessions: [FocusSession] {
+        guard let selectedCategory else { return sorted }
+        return sorted.filter {
+            ($0.category ?? "Uncategorized") == selectedCategory
+        }
+    }
+
+    private var sessionSectionTitle: String {
+        guard let selectedCategory else { return "All sessions" }
+        return "\(selectedCategory) sessions"
+    }
+
+    private func deleteSessions(at offsets: IndexSet) {
+        let toDelete = offsets.map { filteredSessions[$0] }
         Task {
             for session in toDelete {
                 await delete(session)
@@ -174,11 +428,11 @@ private func deleteSessions(at offsets: IndexSet) {
         VStack(alignment: .leading, spacing: 14) {
             HStack(alignment: .firstTextBaseline) {
                 Text("Time per category")
-                    .font(.system(size: 13, weight: .semibold))
+                    .font(DesignPalette.body(14).weight(.bold))
                     .foregroundStyle(FocusChartColors.primaryText)
                 Spacer()
                 Text(windowLabel)
-                    .font(.system(size: 11, weight: .medium))
+                    .font(DesignPalette.body(10))
                     .foregroundStyle(FocusChartColors.secondaryText)
             }
 
@@ -196,9 +450,9 @@ private func deleteSessions(at offsets: IndexSet) {
                 radarSelectionDetail(category: selectedCategory, minutes: total)
             }
         }
-        .padding(16)
+        .padding(18)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(FocusChartColors.chartBackground, in: RoundedRectangle(cornerRadius: 16))
+        .background(FocusChartColors.chartBackground, in: RoundedRectangle(cornerRadius: 20))
         .animation(.snappy(duration: 0.25), value: selectedCategory)
     }
 
@@ -208,17 +462,17 @@ private func deleteSessions(at offsets: IndexSet) {
                 .fill(FocusChartColors.color(for: category))
                 .frame(width: 12, height: 12)
             Text(category)
-                .font(.system(size: 13, weight: .semibold))
+                .font(DesignPalette.body(13).weight(.semibold))
                 .foregroundStyle(FocusChartColors.primaryText)
                 .lineLimit(1)
             Spacer(minLength: 8)
             VStack(alignment: .trailing, spacing: 2) {
                 Text("\(minutes) min")
-                    .font(.system(size: 13, weight: .bold))
+                    .font(DesignPalette.body(13).weight(.bold))
                     .foregroundStyle(FocusChartColors.primaryText)
                     .monospacedDigit()
                 Text(windowLabel)
-                    .font(.system(size: 10, weight: .medium))
+                    .font(DesignPalette.body(10))
                     .foregroundStyle(FocusChartColors.secondaryText)
                     .lineLimit(1)
             }
@@ -230,32 +484,107 @@ private func deleteSessions(at offsets: IndexSet) {
         )
     }
 
-    // MARK: - Sessions per category
+    // MARK: - Category rows and sessions per category
+
+    @ViewBuilder
+    private func categorySwatch(_ category: String) -> some View {
+        if let name = FocusStatsPalette.swatchName(for: category) {
+            Image(name)
+                .resizable()
+                .scaledToFit()
+                .frame(width: 7, height: 7)
+        } else {
+            Circle()
+                .fill(FocusStatsPalette.color(for: category))
+                .frame(width: 7, height: 7)
+        }
+    }
+
+    private var maxCategoryMinutes: Int {
+        max(1, perCategoryTotals.first?.minutes ?? 1)
+    }
+
+    private var categoryBreakdownCard: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            ForEach(perCategoryTotals) { total in
+                Button {
+                    withAnimation(.snappy(duration: 0.25)) {
+                        selectedCategory = selectedCategory == total.category ? nil : total.category
+                    }
+                } label: {
+                    VStack(alignment: .leading, spacing: 7) {
+                        HStack(spacing: 7) {
+                            categorySwatch(total.category)
+                            Text(total.category)
+                                .font(DesignPalette.body(12).weight(.bold))
+                                .foregroundStyle(DesignPalette.ink)
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.8)
+                            Spacer(minLength: 4)
+                            Text("\(total.minutes) min")
+                                .font(DesignPalette.body(11).weight(.bold))
+                                .foregroundStyle(DesignPalette.ink)
+                                .monospacedDigit()
+                        }
+
+                        GeometryReader { proxy in
+                            ZStack(alignment: .leading) {
+                                Capsule()
+                                    .fill(FocusStatsPalette.progressTrack)
+                                Capsule()
+                                    .fill(FocusStatsPalette.color(for: total.category))
+                                    .frame(
+                                        width: max(
+                                            6,
+                                            proxy.size.width * CGFloat(total.minutes) / CGFloat(maxCategoryMinutes)
+                                        )
+                                    )
+                            }
+                        }
+                        .frame(height: 6)
+
+                        Text("\(total.count) session\(total.count == 1 ? "" : "s")")
+                            .font(DesignPalette.body(10))
+                            .foregroundStyle(DesignPalette.secondary)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .buttonStyle(.plain)
+                .contentShape(Rectangle())
+                .accessibilityLabel("Show \(total.category) sessions")
+                .accessibilityAddTraits(selectedCategory == total.category ? .isSelected : [])
+            }
+        }
+        .padding(18)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(DesignPalette.card, in: RoundedRectangle(cornerRadius: 20))
+    }
 
     private var sessionsPerCategoryCard: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("Sessions per category")
-                .font(.headline)
+                .font(DesignPalette.sectionTitle(15))
             ForEach(perCategoryTotals, id: \.category) { total in
-                HStack {
-                    Circle()
-                        .fill(FocusChartColors.color(for: total.category))
-                        .frame(width: 10, height: 10)
+                HStack(spacing: 8) {
+                    categorySwatch(total.category)
                     Text(total.category)
-                    Spacer()
+                        .font(DesignPalette.body(12).weight(.medium))
+                        .foregroundStyle(DesignPalette.ink)
+                        .lineLimit(1)
+                    Spacer(minLength: 4)
                     Text("\(total.count) session\(total.count == 1 ? "" : "s")")
-                        .foregroundStyle(.secondary)
+                        .font(DesignPalette.body(11))
+                        .foregroundStyle(DesignPalette.secondary)
                     Text("\(total.minutes) min")
-                        .foregroundStyle(.secondary)
-                        .fontWeight(.medium)
+                        .font(DesignPalette.body(11).weight(.semibold))
+                        .foregroundStyle(DesignPalette.secondary)
                         .frame(minWidth: 56, alignment: .trailing)
                 }
-                .font(.subheadline)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding()
-        .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 12))
+        .padding(18)
+        .background(DesignPalette.card, in: RoundedRectangle(cornerRadius: 20))
     }
 
     // MARK: - Data
@@ -359,13 +688,52 @@ private struct FocusRadarEntry: Identifiable, Equatable {
     var id: String { category }
 }
 
+/// Focus stats panda: its own seven exported layers, never shared with Focus.
+private struct FocusStatsPanda: View {
+    var body: some View {
+        ZStack(alignment: .topLeading) {
+            Image("body-212a0198")
+                .resizable().scaledToFit()
+                .frame(width: 36.2, height: 29.1)
+                .offset(x: 14.4, y: 28.6)
+            Image("feet-b487e835")
+                .resizable().scaledToFit()
+                .frame(width: 40.7, height: 10.6)
+                .offset(x: 11.2, y: 47.6)
+            Image("ears-37ab26a5")
+                .resizable().scaledToFit()
+                .frame(width: 36.0, height: 9.8)
+                .offset(x: 14.3, y: 6.0)
+            Image("head-7a970e74")
+                .resizable().scaledToFit()
+                .frame(width: 35.5, height: 29.2)
+                .offset(x: 14.9, y: 8.5)
+            Image("thumbs-up-e5270999")
+                .resizable().scaledToFit()
+                .frame(width: 15.0, height: 17.4)
+                .offset(x: 5.6, y: 26.1)
+            Image("bamboo-22449151")
+                .resizable().scaledToFit()
+                .frame(width: 13.2, height: 26.8)
+                .offset(x: 46.4, y: 25.1)
+            Image("holding-paw-781a6ba0")
+                .resizable().scaledToFit()
+                .frame(width: 10.5, height: 9.4)
+                .offset(x: 43.4, y: 35.7)
+        }
+        .frame(width: 64, height: 64)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Panda cheering you on")
+    }
+}
+
 // MARK: - Colors
 
 enum FocusChartColors {
-    static let chartBackground = Color(red: 0.086, green: 0.094, blue: 0.12)
-    static let primaryText = Color.white.opacity(0.9)
-    static let secondaryText = Color.white.opacity(0.55)
-    static let skyBlue = Color(red: 0.32, green: 0.66, blue: 0.93)
+    static let chartBackground = DesignPalette.card
+    static let primaryText = DesignPalette.ink
+    static let secondaryText = DesignPalette.secondary
+    static let skyBlue = Color(red: 147 / 255, green: 185 / 255, blue: 103 / 255)
 
     static let palette: [Color] = [
         Color(red: 0.93, green: 0.33, blue: 0.33), // coral red
@@ -378,7 +746,7 @@ enum FocusChartColors {
         Color(red: 0.92, green: 0.34, blue: 0.61), // magenta
         Color(red: 0.32, green: 0.66, blue: 0.93), // sky blue
         Color(red: 0.93, green: 0.78, blue: 0.55), // sand
-        Color(red: 0.55, green: 0.37, blue: 0.30), // umber
+        Color(red: 0.50, green: 0.37, blue: 0.30), // umber
         Color(red: 0.62, green: 0.83, blue: 0.44), // lime
         Color(red: 0.65, green: 0.36, blue: 0.55), // plum
         Color(red: 0.25, green: 0.55, blue: 0.82), // steel blue
@@ -420,7 +788,7 @@ private struct FocusRadarChart: View {
                 axisLabels(count: count)
             } else {
                 Text("No sessions in this window")
-                    .font(.caption)
+                    .font(DesignPalette.body(12))
                     .foregroundStyle(FocusChartColors.secondaryText)
             }
         }
@@ -446,7 +814,7 @@ private struct FocusRadarChart: View {
                     point: point
                 )
                 .stroke(
-                    Color.white.opacity(level == 4 ? 0.25 : 0.1),
+                    FocusChartColors.primaryText.opacity(level == 4 ? 0.22 : 0.1),
                     lineWidth: 1
                 )
             }
@@ -456,7 +824,7 @@ private struct FocusRadarChart: View {
                         path.move(to: CGPoint(x: size / 2, y: size / 2))
                         path.addLine(to: point(count: count, index: index, radius: maxRadius))
                     }
-                    .stroke(Color.white.opacity(0.08), lineWidth: 1)
+                    .stroke(FocusChartColors.primaryText.opacity(0.08), lineWidth: 1)
                 }
             }
         }
@@ -518,7 +886,7 @@ private struct FocusRadarChart: View {
                     .overlay(
                         Circle()
                             .strokeBorder(
-                                isSelected ? Color.white : Color.white.opacity(0.85),
+                                FocusChartColors.primaryText.opacity(isSelected ? 0.9 : 0.25),
                                 lineWidth: isSelected ? 2 : 1
                             )
                     )
@@ -541,7 +909,7 @@ private struct FocusRadarChart: View {
                 onSelect(entry.category)
             } label: {
                 Text(entry.category)
-                    .font(.system(size: 11, weight: isSelected ? .semibold : .medium))
+                    .font(DesignPalette.body(11).weight(isSelected ? .semibold : .medium))
                     .foregroundStyle(
                         isSelected
                             ? FocusChartColors.color(for: entry.category)

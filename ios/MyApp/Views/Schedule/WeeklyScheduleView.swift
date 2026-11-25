@@ -109,8 +109,10 @@ struct WeeklyScheduleView: View {
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
-                    viewModePicker
+                VStack(alignment: .leading, spacing: 20) {
+                    scheduleHeader
+
+                    encouragementCard
 
                     if recommendationService.isLoading {
                         HStack {
@@ -118,7 +120,9 @@ struct WeeklyScheduleView: View {
                             ProgressView("Finding recommendations…")
                             Spacer()
                         }
-                        .padding(.vertical, 8)
+                        .font(DesignPalette.body(12))
+                        .foregroundStyle(DesignPalette.secondary)
+                        .padding(.vertical, 4)
                     }
 
                     if let message = activeErrorMessage, !errorDismissed {
@@ -129,22 +133,28 @@ struct WeeklyScheduleView: View {
                         permissionDeniedBanner
                     }
 
+                    viewModePicker
+
                     switch viewMode {
                     case .calendar:
                         monthGrid
                         dayContent
+                        recommendationsSection(selectedDate)
                         unscheduledSection
                     case .review:
                         reviewContent
                     }
                 }
+                .padding(.horizontal, DesignPalette.pagePadding)
+                .padding(.vertical, 16)
                 .coordinateSpace(name: "schedule")
-                .padding()
             }
+            .appBackdrop()
             .refreshable {
                 await loadData(force: true)
             }
             .navigationTitle("Schedule")
+            .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItemGroup(placement: .primaryAction) {
                     Button {
@@ -254,107 +264,287 @@ struct WeeklyScheduleView: View {
         recommendationService.errorMessage ?? scheduleService.errorMessage
     }
 
-    private var viewModePicker: some View {
-        Picker("View", selection: $viewMode) {
-            ForEach(ScheduleViewMode.allCases) { mode in
-                Text(mode.label).tag(mode)
-            }
-        }
-        .pickerStyle(.segmented)
-        .frame(maxWidth: .infinity)
+    private var scheduleSegmentTrack: Color {
+        Color(.sRGB, red: 228.0 / 255.0, green: 231.0 / 255.0, blue: 220.0 / 255.0)
     }
 
-private var dayContent: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            if calendar.isDateInToday(selectedDate) {
-                HStack(spacing: 6) {
-                    Image(systemName: "clock")
+    private var dayPlanCount: Int {
+        groupExactOverlap(events(for: selectedDate)).count
+    }
+
+    private var scheduleHeader: some View {
+        AppHeader(eyebrow: "Schedule", title: "Big plans.\nPanda-sized steps.") {
+            Button {
+                showSettings = true
+            } label: {
+                Image("settings-icon")
+                    .renderingMode(.template)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 22, height: 22)
+                    .foregroundStyle(DesignPalette.primary)
+                    .frame(width: 44, height: 44)
+                    .background(DesignPalette.card, in: RoundedRectangle(cornerRadius: 12))
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Settings")
+        }
+    }
+
+    private var encouragementCard: some View {
+        HStack(alignment: .center, spacing: 12) {
+            VStack(alignment: .leading, spacing: 7) {
+                Text("Less chaos. More bamboo.")
+                    .font(DesignPalette.body(21).weight(.bold))
+                    .foregroundStyle(DesignPalette.ink)
+                    .minimumScaleFactor(0.8)
+
+                Text("One thing at a time. Snacks later.")
+                    .font(DesignPalette.body(11))
+                    .foregroundStyle(DesignPalette.secondary)
+
+                Text("\(dayPlanCount) thing\(dayPlanCount == 1 ? "" : "s") in your day")
+                    .font(DesignPalette.body(10).weight(.bold))
+                    .foregroundStyle(DesignPalette.primary)
+                    .padding(.horizontal, 11)
+                    .padding(.vertical, 6)
+                    .background(DesignPalette.card, in: Capsule())
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            schedulePanda
+        }
+        .padding(EdgeInsets(top: 18, leading: 20, bottom: 18, trailing: 12))
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(DesignPalette.sage, in: RoundedRectangle(cornerRadius: 22))
+    }
+
+    /// Schedule frame panda, assembled from its own seven exported layers.
+    private var schedulePanda: some View {
+        ZStack(alignment: .topLeading) {
+            Image("body")
+                .resizable().scaledToFit()
+                .frame(width: 52, height: 42)
+                .offset(x: 20.7, y: 41.1)
+            Image("feet-8609182e")
+                .resizable().scaledToFit()
+                .frame(width: 58.6, height: 15.2)
+                .offset(x: 16.1, y: 68.4)
+            Image("ears-fe715ffd")
+                .resizable().scaledToFit()
+                .frame(width: 51.7, height: 14)
+                .offset(x: 20.6, y: 8.6)
+            Image("head-f1986076")
+                .resizable().scaledToFit()
+                .frame(width: 51.1, height: 41.9)
+                .offset(x: 20.3, y: 11.2)
+            Image("thumbs-up-ac6f73fb")
+                .resizable().scaledToFit()
+                .frame(width: 21.5, height: 25.1)
+                .offset(x: 8, y: 37.5)
+            Image("bamboo-b836da48")
+                .resizable().scaledToFit()
+                .frame(width: 19.4, height: 38.5)
+                .offset(x: 64.7, y: 36)
+            Image("holding-paw")
+                .resizable().scaledToFit()
+                .frame(width: 15.1, height: 13.5)
+                .offset(x: 62.4, y: 51.3)
+        }
+        .frame(width: 92, height: 92)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Panda giving a thumbs up")
+    }
+
+    private var viewModePicker: some View {
+        HStack(spacing: 4) {
+            ForEach(ScheduleViewMode.allCases) { mode in
+                Button {
+                    withAnimation(.snappy(duration: 0.2)) {
+                        viewMode = mode
+                    }
+                } label: {
+                    Text(mode.label)
+                        .font(DesignPalette.body(12).weight(.bold))
+                        .frame(maxWidth: .infinity, minHeight: 34)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(viewMode == mode ? DesignPalette.primary : DesignPalette.secondary)
+                .background(
+                    viewMode == mode ? DesignPalette.card : Color.clear,
+                    in: RoundedRectangle(cornerRadius: 12)
+                )
+                .accessibilityLabel("\(mode.label) view")
+                .accessibilityAddTraits(viewMode == mode ? AccessibilityTraits.isSelected : [])
+            }
+        }
+        .padding(4)
+        .background(scheduleSegmentTrack, in: RoundedRectangle(cornerRadius: 12))
+    }
+
+    private var dayContent: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .firstTextBaseline) {
+                Text(selectedDate, format: .dateTime.weekday(.wide).month(.abbreviated).day())
+                    .font(DesignPalette.body(17).weight(.bold))
+                    .foregroundStyle(DesignPalette.ink)
+                    .minimumScaleFactor(0.8)
+
+                Spacer(minLength: 8)
+
+                if calendar.isDateInToday(selectedDate) {
                     TimelineView(.periodic(from: .now, by: 60)) { context in
                         Text("Now · \(context.date.formatted(date: .omitted, time: .shortened))")
                     }
+                    .font(DesignPalette.body(10))
+                    .foregroundStyle(DesignPalette.secondary)
                 }
-                .font(.caption.weight(.medium))
-                .foregroundStyle(.secondary)
-                .padding(.horizontal, 4)
             }
+
             daySection(selectedDate)
         }
     }
 
+    private var weekDays: [Date] {
+        let start = calendar.dateInterval(of: .weekOfYear, for: selectedDate)?.start ?? dayStart
+        return (0..<7).compactMap { calendar.date(byAdding: .day, value: $0, to: start) }
+    }
+
     private var monthGrid: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
+        VStack(alignment: .leading, spacing: 13) {
+            HStack(spacing: 8) {
                 Button {
                     withAnimation(.snappy(duration: 0.25)) {
                         calendarExpanded.toggle()
                     }
                 } label: {
                     HStack(spacing: 6) {
-                        Image(systemName: calendarExpanded ? "chevron.up" : "chevron.down")
-                            .font(.caption.weight(.semibold))
                         Text(calendarExpanded
                             ? calendarMonth.formatted(.dateTime.month(.wide).year())
                             : "View calendar")
-                            .font(.subheadline.weight(.semibold))
+                            .font(DesignPalette.body(15).weight(.bold))
+                        Image("down-icon")
+                            .renderingMode(.template)
+                            .resizable()
+                            .scaledToFit()
+                            .frame(width: 15, height: 15)
+                            .rotationEffect(.degrees(calendarExpanded ? 180 : 0))
                     }
-                    .foregroundStyle(.primary)
+                    .foregroundStyle(DesignPalette.ink)
                     .contentTransition(.opacity)
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel(calendarExpanded ? "Collapse calendar" : "Expand calendar")
 
-                Spacer()
+                Spacer(minLength: 4)
 
                 Button {
                     selectedDate = Date()
                     calendarMonth = Date()
                 } label: {
-                    Label("Today", systemImage: "sun.max")
+                    Text("Today")
+                        .font(DesignPalette.body(10).weight(.bold))
+                        .foregroundStyle(DesignPalette.ink)
+                        .padding(.horizontal, 11)
+                        .padding(.vertical, 6)
+                        .background(DesignPalette.cream, in: Capsule())
                 }
+                .buttonStyle(.plain)
                 .accessibilityLabel("Jump to today")
 
-                if calendarExpanded {
-                    Button {
-                        stepMonth(-1)
-                    } label: {
-                        Image(systemName: "chevron.left")
-                    }
-                    .accessibilityLabel("Previous month")
-                    Button {
-                        stepMonth(1)
-                    } label: {
-                        Image(systemName: "chevron.right")
-                    }
-                    .accessibilityLabel("Next month")
+                calendarArrow(image: "left-icon", label: "Previous month") {
+                    stepMonth(-1)
+                }
+                calendarArrow(image: "right-icon", label: "Next month") {
+                    stepMonth(1)
                 }
             }
-            .padding(.horizontal, 4)
+
+            HStack(spacing: 5) {
+                ForEach(weekDays, id: \.self) { day in
+                    weekCell(day)
+                }
+            }
 
             if calendarExpanded {
-                HStack {
+                HStack(spacing: 0) {
                     ForEach(Array(orderedWeekdaySymbols.enumerated()), id: \.offset) { _, symbol in
                         Text(symbol)
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
+                            .font(DesignPalette.body(10).weight(.semibold))
+                            .foregroundStyle(DesignPalette.secondary)
                             .frame(maxWidth: .infinity)
                     }
                 }
 
-                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 7), spacing: 8) {
+                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 6), count: 7), spacing: 6) {
                     ForEach(Array(monthCells.enumerated()), id: \.offset) { _, day in
                         if let day {
                             monthCell(day)
                         } else {
                             Color.clear
                                 .frame(maxWidth: .infinity)
-                                .frame(height: 40)
+                                .frame(height: 44)
                         }
                     }
                 }
             }
         }
-        .padding()
-        .background(.background, in: RoundedRectangle(cornerRadius: 12))
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(DesignPalette.card, in: RoundedRectangle(cornerRadius: 18))
+    }
+
+    private func calendarArrow(image: String, label: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(image)
+                .renderingMode(.template)
+                .resizable()
+                .scaledToFit()
+                .frame(width: 18, height: 18)
+                .foregroundStyle(DesignPalette.primary)
+                .frame(width: 30, height: 30)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(label)
+    }
+
+    private func weekCell(_ day: Date) -> some View {
+        let isSelected = calendar.isDate(day, inSameDayAs: selectedDate)
+        let weekdayIndex = calendar.component(.weekday, from: day) - 1
+        let veryShortSymbols = calendar.veryShortWeekdaySymbols
+        let symbol = veryShortSymbols[max(0, min(weekdayIndex, veryShortSymbols.count - 1))]
+        let hasEvents = !events(for: day).isEmpty
+        let dateLabel = day.formatted(.dateTime.weekday(.wide).month(.abbreviated).day())
+
+        return Button {
+            selectedDate = day
+            calendarMonth = day
+        } label: {
+            VStack(spacing: 6) {
+                Text(symbol)
+                    .font(DesignPalette.body(10).weight(.semibold))
+                Text("\(calendar.component(.day, from: day))")
+                    .font(DesignPalette.body(16).weight(.bold))
+                if hasEvents {
+                    Image(isSelected ? "scheduled-activity-1" : "scheduled-activity")
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: 4, height: 4)
+                } else {
+                    Color.clear.frame(width: 4, height: 4)
+                }
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 10)
+            .foregroundStyle(isSelected ? Color.white : DesignPalette.ink)
+            .background(isSelected ? DesignPalette.primary : DesignPalette.card, in: RoundedRectangle(cornerRadius: 13))
+            .overlay(
+                RoundedRectangle(cornerRadius: 13)
+                    .stroke(isSelected ? Color.clear : DesignPalette.background, lineWidth: 1)
+            )
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(hasEvents ? "\(dateLabel), scheduled activity" : dateLabel)
     }
 
     private func stepMonth(_ delta: Int) {
@@ -368,104 +558,91 @@ private var dayContent: some View {
 
         return Button {
             selectedDate = day
+            calendarMonth = day
         } label: {
             VStack(spacing: 4) {
                 Text("\(calendar.component(.day, from: day))")
-                    .font(.subheadline)
-                    .fontWeight(isToday ? .bold : .regular)
-                Circle()
-                    .fill(hasEvents ? Color.accentColor : Color.clear)
-                    .frame(width: 5, height: 5)
+                    .font(DesignPalette.body(16).weight(isToday ? .bold : .semibold))
+                if hasEvents {
+                    Image(isSelected ? "scheduled-activity-1" : "scheduled-activity")
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: 4, height: 4)
+                } else {
+                    Color.clear.frame(width: 4, height: 4)
+                }
             }
             .frame(maxWidth: .infinity)
-            .frame(height: 40)
-            .background(
-                isSelected ? Color.accentColor.opacity(0.2) : Color.clear,
-                in: RoundedRectangle(cornerRadius: 8)
-            )
+            .frame(height: 44)
+            .foregroundStyle(isSelected ? Color.white : DesignPalette.ink)
+            .background(isSelected ? DesignPalette.primary : DesignPalette.card, in: RoundedRectangle(cornerRadius: 12))
             .overlay(
-                RoundedRectangle(cornerRadius: 8)
-                    .stroke(isToday ? Color.accentColor : Color.clear, lineWidth: isToday ? 1 : 0)
+                RoundedRectangle(cornerRadius: 12)
+                    .stroke(isToday && !isSelected ? DesignPalette.primary : Color.clear, lineWidth: 1)
             )
         }
         .buttonStyle(.plain)
+        .accessibilityLabel(day.formatted(.dateTime.weekday(.wide).month(.abbreviated).day()))
     }
 
     private func errorBanner(_ message: String) -> some View {
-        HStack {
+        HStack(spacing: 8) {
             Text(message)
-                .font(.footnote)
+                .font(DesignPalette.body(12))
+                .foregroundStyle(DesignPalette.ink)
             Spacer()
             Button {
                 errorDismissed = true
             } label: {
                 Image(systemName: "xmark.circle.fill")
+                    .foregroundStyle(DesignPalette.secondary)
             }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Dismiss error")
         }
-        .padding()
-        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 12))
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(DesignPalette.cream, in: RoundedRectangle(cornerRadius: 15))
     }
 
     private var permissionDeniedBanner: some View {
         HStack(spacing: 8) {
             Image(systemName: "calendar.badge.exclamationmark")
+                .foregroundStyle(DesignPalette.primary)
             Text("Calendar access is off. Enable it in Settings to see your events.")
-                .font(.footnote)
+                .font(DesignPalette.body(12))
+                .foregroundStyle(DesignPalette.ink)
             Spacer()
         }
-        .padding()
-        .background(Color.orange.opacity(0.15), in: RoundedRectangle(cornerRadius: 12))
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(DesignPalette.sage, in: RoundedRectangle(cornerRadius: 15))
     }
 
     // MARK: - Day section (calendar events + recommendations)
 
     private func daySection(_ day: Date) -> some View {
         let groups = groupExactOverlap(events(for: day))
-        let isToday = calendar.isDateInToday(day)
 
-        return VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 8) {
-                Text(day, format: .dateTime.weekday(.abbreviated))
-                    .font(.headline)
-                Text(day, format: .dateTime.month().day())
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                Spacer()
-                if isToday {
-                    Text("Today")
-                        .font(.caption.bold())
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 3)
-                        .background(Color.accentColor.opacity(0.2), in: Capsule())
-                }
-            }
-
+        return VStack(alignment: .leading, spacing: 9) {
             if groups.isEmpty {
                 Text("No events")
-                    .font(.footnote)
-                    .foregroundStyle(.tertiary)
+                    .font(DesignPalette.body(12))
+                    .foregroundStyle(DesignPalette.secondary)
                     .frame(maxWidth: .infinity, alignment: .center)
-                    .padding(.vertical, 12)
+                    .padding(14)
+                    .frame(maxWidth: .infinity)
+                    .background(DesignPalette.card, in: RoundedRectangle(cornerRadius: 15))
             } else {
-                VStack(spacing: 6) {
-                    ForEach(Array(groups.enumerated()), id: \.offset) { slotIndex, group in
-                        if group.count == 1 {
-                            eventRow(group[0])
-                        } else {
-                            eventSlot(group, day: day, slotIndex: slotIndex)
-                        }
+                ForEach(Array(groups.enumerated()), id: \.offset) { slotIndex, group in
+                    if group.count == 1 {
+                        eventRow(group[0])
+                    } else {
+                        eventSlot(group, day: day, slotIndex: slotIndex)
                     }
                 }
             }
-
-            recommendationsSection(day)
         }
-        .padding()
-        .background(.background, in: RoundedRectangle(cornerRadius: 12))
-        .overlay(
-            RoundedRectangle(cornerRadius: 12)
-                .stroke(isToday ? Color.accentColor : Color(.separator), lineWidth: isToday ? 1.5 : 0.5)
-        )
     }
 
     // MARK: - Recommendations
@@ -475,34 +652,39 @@ private var dayContent: some View {
 
         return Group {
             if let recommendation {
-                VStack(alignment: .leading, spacing: 6) {
-                    Divider()
-                    HStack(spacing: 6) {
-                        Image(systemName: "lightbulb.fill")
-                            .font(.caption)
-                            .foregroundStyle(.yellow)
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(spacing: 8) {
+                        Image("spark-icon")
+                            .renderingMode(.template)
+                            .resizable()
+                            .scaledToFit()
+                            .frame(width: 17, height: 17)
+                            .foregroundStyle(DesignPalette.primary)
+
                         Text("Recommended")
-                            .font(.subheadline.weight(.semibold))
-                        Spacer()
+                            .font(DesignPalette.body(14).weight(.bold))
+                            .foregroundStyle(DesignPalette.ink)
+
+                        Spacer(minLength: 4)
+
                         if calendar.isDateInToday(day) {
                             Text("\(formatMinutes(remainingFreeMinutesToday())) left today")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
+                                .font(DesignPalette.body(11).weight(.semibold))
+                                .foregroundStyle(DesignPalette.secondary)
                         } else {
                             Text("\(formatMinutes(recommendation.availableMinutes)) free")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
+                                .font(DesignPalette.body(11).weight(.semibold))
+                                .foregroundStyle(DesignPalette.secondary)
                         }
                     }
-                    .padding(.top, 4)
 
                     if !didSeeReorderTip && !recommendation.items.isEmpty {
                         Label("Long-press and drag a task to reorder", systemImage: "hand.draw")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+                            .font(DesignPalette.body(11))
+                            .foregroundStyle(DesignPalette.secondary)
                             .padding(8)
                             .frame(maxWidth: .infinity, alignment: .leading)
-                            .background(Color.accentColor.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
+                            .background(DesignPalette.sage, in: RoundedRectangle(cornerRadius: 10))
                             .onAppear {
                                 didSeeReorderTip = true
                             }
@@ -511,14 +693,15 @@ private var dayContent: some View {
                     if recommendation.items.isEmpty {
                         VStack(alignment: .leading, spacing: 8) {
                             Text("Nothing recommended — no free time or no open tasks.")
-                                .font(.footnote)
-                                .foregroundStyle(.tertiary)
+                                .font(DesignPalette.body(12))
+                                .foregroundStyle(DesignPalette.ink)
                             Button {
                                 showAddTask = true
                             } label: {
                                 Label("Add a task", systemImage: "plus")
                             }
                             .buttonStyle(.bordered)
+                            .tint(DesignPalette.primary)
                             .controlSize(.small)
                         }
                         .padding(.vertical, 4)
@@ -531,7 +714,7 @@ private var dayContent: some View {
                                 .overlay {
                                     if draggingId == item.id {
                                         recommendedRow(item, for: day)
-                                            .background(.ultraThickMaterial, in: RoundedRectangle(cornerRadius: 8))
+                                            .background(DesignPalette.card.opacity(0.9), in: RoundedRectangle(cornerRadius: 15))
                                     }
                                 }
                                 .background(
@@ -556,15 +739,30 @@ private var dayContent: some View {
                         }
                     }
                 }
+                .padding(EdgeInsets(top: 17, leading: 18, bottom: 17, trailing: 18))
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(DesignPalette.cream, in: RoundedRectangle(cornerRadius: 18))
             } else if !recommendationService.isLoading,
                       let message = recommendationService.errorMessage {
-                VStack(alignment: .leading, spacing: 4) {
-                    Divider()
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack(spacing: 8) {
+                        Image("spark-icon")
+                            .renderingMode(.template)
+                            .resizable()
+                            .scaledToFit()
+                            .frame(width: 17, height: 17)
+                            .foregroundStyle(DesignPalette.primary)
+                        Text("Recommended")
+                            .font(DesignPalette.body(14).weight(.bold))
+                            .foregroundStyle(DesignPalette.ink)
+                    }
                     Label(message, systemImage: "exclamationmark.triangle")
-                        .font(.footnote)
-                        .foregroundStyle(.orange)
-                        .padding(.vertical, 4)
+                        .font(DesignPalette.body(12))
+                        .foregroundStyle(DesignPalette.secondary)
                 }
+                .padding(EdgeInsets(top: 17, leading: 18, bottom: 17, trailing: 18))
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(DesignPalette.cream, in: RoundedRectangle(cornerRadius: 18))
             }
         }
     }
@@ -573,15 +771,16 @@ private var dayContent: some View {
         let isToday = calendar.isDateInToday(day)
         let remainingToday = remainingFreeMinutesToday()
 
-        return HStack(spacing: 6) {
+        return HStack(spacing: 10) {
             Button {
                 startRecommendedFocus(item)
             } label: {
                 Image(systemName: "play.circle.fill")
-                    .font(.title2)
-                    .foregroundStyle(.tint)
+                    .font(.system(size: 24, weight: .semibold))
+                    .foregroundStyle(DesignPalette.primary)
+                    .frame(width: 36, height: 36)
             }
-            .buttonStyle(.borderless)
+            .buttonStyle(.plain)
             .accessibilityLabel("Start focus on \(displayTitle(item))")
 
             Button {
@@ -590,72 +789,86 @@ private var dayContent: some View {
                 }
             } label: {
                 HStack(spacing: 10) {
-                RoundedRectangle(cornerRadius: 2)
-                    .fill(priorityColor(item.priority))
-                    .frame(width: 4, height: 34)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(displayTitle(item))
-                        .font(.subheadline.weight(.medium))
-                        .lineLimit(2)
-                    if let category = item.category, !category.isEmpty {
-                        Text(category)
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 2)
-                            .background(.quaternary, in: Capsule())
+                    RoundedRectangle(cornerRadius: 2)
+                        .fill(priorityColor(item.priority))
+                        .frame(width: 4, height: 34)
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(displayTitle(item))
+                            .font(DesignPalette.body(14).weight(.bold))
+                            .foregroundStyle(DesignPalette.ink)
+                            .lineLimit(2)
+                        if let category = item.category, !category.isEmpty {
+                            Text(category)
+                                .font(DesignPalette.body(10))
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 2)
+                                .background(DesignPalette.sage, in: Capsule())
+                                .foregroundStyle(DesignPalette.secondary)
+                        }
+                        if let block = item.timeBlockText {
+                            Label(block, systemImage: "clock")
+                                .font(DesignPalette.body(11))
+                                .foregroundStyle(DesignPalette.secondary)
+                        } else if !item.reason.isEmpty {
+                            Text(item.reason)
+                                .font(DesignPalette.body(11))
+                                .foregroundStyle(DesignPalette.secondary)
+                        }
+                        if item.isOverdue {
+                            Label("Overdue", systemImage: "exclamationmark.circle.fill")
+                                .font(DesignPalette.body(11))
+                                .foregroundStyle(.red)
+                        }
                     }
-                    if let block = item.timeBlockText {
-                        Label(block, systemImage: "clock")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                    } else if !item.reason.isEmpty {
-                        Text(item.reason)
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
+
+                    Spacer(minLength: 4)
+
+                    if isToday && remainingToday < item.minutes {
+                        Label(
+                            "Needs \(formatMinutes(item.minutes - remainingToday)) more free time",
+                            systemImage: "clock"
+                        )
+                        .font(DesignPalette.body(10))
+                        .foregroundStyle(DesignPalette.secondary)
                     }
-                    if item.isOverdue {
-                        Label("Overdue", systemImage: "exclamationmark.circle.fill")
-                            .font(.caption2)
-                            .foregroundStyle(.red)
+
+                    VStack(spacing: 4) {
+                        Text(formatMinutes(item.minutes))
+                            .font(DesignPalette.body(11).weight(.semibold))
+                            .monospacedDigit()
+                            .foregroundStyle(DesignPalette.ink)
+                        Image("right-icon-1")
+                            .renderingMode(.template)
+                            .resizable()
+                            .scaledToFit()
+                            .frame(width: 14, height: 14)
+                            .foregroundStyle(DesignPalette.secondary)
                     }
                 }
-                Spacer()
-                if isToday && remainingToday < item.minutes {
-                    Label(
-                        "Needs \(formatMinutes(item.minutes - remainingToday)) more free time",
-                        systemImage: "clock"
-                    )
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                }
-                Text(formatMinutes(item.minutes))
-                    .font(.caption.weight(.semibold))
-                    .monospacedDigit()
-                Image(systemName: "line.3.horizontal")
-                    .font(.caption)
-                    .foregroundStyle(.tertiary)
-            }
             }
             .buttonStyle(.plain)
         }
-        .padding(.vertical, 8)
-        .padding(.horizontal, 8)
-        .background(Color.yellow.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(DesignPalette.card, in: RoundedRectangle(cornerRadius: 15))
     }
 
     private var unscheduledSection: some View {
         let parts = recommendationService.unscheduled
         return Group {
             if !parts.isEmpty {
-                VStack(alignment: .leading, spacing: 8) {
-                    HStack(spacing: 6) {
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack(spacing: 8) {
                         Image(systemName: "clock.badge.exclamationmark")
-                            .foregroundStyle(.orange)
+                            .foregroundStyle(DesignPalette.primary)
                         Text("Doesn't fit this window")
-                            .font(.subheadline.weight(.semibold))
+                            .font(DesignPalette.body(14).weight(.bold))
+                            .foregroundStyle(DesignPalette.ink)
                     }
                     Text("These tasks can't fit before their deadlines within this window. Adjust your work hours, free up calendar time, or break them into smaller pieces.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .font(DesignPalette.body(12))
+                        .foregroundStyle(DesignPalette.secondary)
                     ForEach(parts) { part in
                         HStack(spacing: 10) {
                             RoundedRectangle(cornerRadius: 2)
@@ -663,28 +876,26 @@ private var dayContent: some View {
                                 .frame(width: 4, height: 22)
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(displayTitle(taskTitle: part.taskTitle, partTitle: part.partTitle))
-                                    .font(.subheadline)
+                                    .font(DesignPalette.body(13).weight(.semibold))
                                     .lineLimit(2)
                                 if let category = part.category, !category.isEmpty {
                                     Text(category)
-                                        .font(.caption2)
+                                        .font(DesignPalette.body(10))
                                         .padding(.horizontal, 8)
                                         .padding(.vertical, 2)
-                                        .background(.quaternary, in: Capsule())
+                                        .background(DesignPalette.sage, in: Capsule())
+                                        .foregroundStyle(DesignPalette.secondary)
                                 }
                             }
                             Spacer()
                             Text(formatMinutes(part.minutes))
-                                .font(.caption.weight(.semibold))
+                                .font(DesignPalette.body(11).weight(.semibold))
                                 .monospacedDigit()
-                                .foregroundStyle(.secondary)
+                                .foregroundStyle(DesignPalette.secondary)
                         }
-                        .padding(.vertical, 6)
-                        .padding(.horizontal, 8)
-                        .background(
-                            Color.orange.opacity(0.08),
-                            in: RoundedRectangle(cornerRadius: 8)
-                        )
+                        .padding(.vertical, 8)
+                        .padding(.horizontal, 10)
+                        .background(DesignPalette.cream, in: RoundedRectangle(cornerRadius: 12))
                     }
                     Button {
                         showPreferences = true
@@ -692,15 +903,12 @@ private var dayContent: some View {
                         Label("Adjust work hours", systemImage: "slider.horizontal.3")
                     }
                     .buttonStyle(.bordered)
+                    .tint(DesignPalette.primary)
                     .controlSize(.small)
                 }
-                .padding()
+                .padding(18)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .background(.background, in: RoundedRectangle(cornerRadius: 12))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 12)
-                        .stroke(Color(.separator), lineWidth: 0.5)
-                )
+                .background(DesignPalette.card, in: RoundedRectangle(cornerRadius: 18))
             }
         }
     }
@@ -731,11 +939,12 @@ private var dayContent: some View {
                 )
                 .frame(maxWidth: .infinity)
                 .padding(.top, 48)
+                .tint(DesignPalette.primary)
             } else {
                 VStack(alignment: .leading, spacing: 10) {
                     Text("\(pendingReviews.count) event\(pendingReviews.count == 1 ? "" : "s") to confirm")
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(.secondary)
+                        .font(DesignPalette.body(14).weight(.bold))
+                        .foregroundStyle(DesignPalette.secondary)
                         .padding(.horizontal, 4)
 
                     ForEach(orderStore.reorder(pendingReviews, id: \.id.uuidString)) { task in
@@ -744,7 +953,7 @@ private var dayContent: some View {
                             .overlay {
                                 if draggingId == task.id.uuidString {
                                     reviewRow(task)
-                                        .background(.ultraThickMaterial, in: RoundedRectangle(cornerRadius: 12))
+                                        .background(DesignPalette.card.opacity(0.9), in: RoundedRectangle(cornerRadius: 15))
                                 }
                             }
                             .background(
@@ -783,33 +992,35 @@ private var dayContent: some View {
     }
 
     private func reviewRow(_ task: TaskItem) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 10) {
                 RoundedRectangle(cornerRadius: 2)
                     .fill(priorityColor(task.priority))
                     .frame(width: 4, height: 34)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(task.title)
-                        .font(.subheadline.weight(.medium))
+                        .font(DesignPalette.body(14).weight(.bold))
+                        .foregroundStyle(DesignPalette.ink)
                         .lineLimit(2)
                     if let start = task.startAt, let end = task.endAt {
                         Text("\(start.formatted(date: .abbreviated, time: .shortened)) – \(end.formatted(date: .omitted, time: .shortened))")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+                            .font(DesignPalette.body(11))
+                            .foregroundStyle(DesignPalette.secondary)
                     } else if let start = task.startAt {
                         Text(start.formatted(date: .abbreviated, time: .shortened))
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+                            .font(DesignPalette.body(11))
+                            .foregroundStyle(DesignPalette.secondary)
                     }
                 }
-                Spacer()
+                Spacer(minLength: 4)
                 Button {
                     confirmReview(task)
                 } label: {
                     Label("Looks good", systemImage: "checkmark.circle.fill")
-                        .font(.subheadline)
+                        .font(DesignPalette.body(12).weight(.bold))
                 }
                 .buttonStyle(.borderedProminent)
+                .tint(DesignPalette.primary)
                 .controlSize(.small)
             }
 
@@ -821,16 +1032,12 @@ private var dayContent: some View {
                     Label(deadline.formatted(date: .abbreviated, time: .omitted), systemImage: "flag")
                 }
             }
-            .font(.caption2)
-            .foregroundStyle(.secondary)
+            .font(DesignPalette.body(11))
+            .foregroundStyle(DesignPalette.secondary)
         }
-        .padding()
+        .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.background, in: RoundedRectangle(cornerRadius: 12))
-        .overlay(
-            RoundedRectangle(cornerRadius: 12)
-                .stroke(Color(.separator), lineWidth: 0.5)
-        )
+        .background(DesignPalette.card, in: RoundedRectangle(cornerRadius: 15))
     }
 
     private func reviewDuration(_ task: TaskItem) -> Int? {
@@ -1024,12 +1231,9 @@ private var dayContent: some View {
         let key = slotKey(day, slotIndex: slotIndex)
         let isExpanded = expandedSlots.contains(key)
 
-        return VStack(spacing: 0) {
+        return VStack(alignment: .leading, spacing: 9) {
             if isExpanded {
-                ForEach(Array(items.enumerated()), id: \.element.id) { idx, item in
-                    if idx > 0 {
-                        Divider().padding(.horizontal, 8)
-                    }
+                ForEach(Array(items.enumerated()), id: \.element.id) { _, item in
                     eventRow(item)
                 }
                 Button {
@@ -1038,10 +1242,11 @@ private var dayContent: some View {
                     }
                 } label: {
                     Label("Collapse", systemImage: "chevron.up")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .font(DesignPalette.body(11).weight(.semibold))
+                        .foregroundStyle(DesignPalette.secondary)
                         .frame(maxWidth: .infinity)
-                        .padding(.vertical, 6)
+                        .padding(.vertical, 8)
+                        .background(DesignPalette.cream, in: Capsule())
                 }
                 .buttonStyle(.plain)
             } else {
@@ -1051,32 +1256,41 @@ private var dayContent: some View {
                         _ = expandedSlots.insert(key)
                     }
                 } label: {
-                    HStack(spacing: 10) {
-                        RoundedRectangle(cornerRadius: 2)
-                            .fill(.gray)
-                            .frame(width: 4)
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(first.title)
-                                .font(.subheadline)
-                                .lineLimit(1)
-                            Text("\(first.start.formatted(date: .omitted, time: .shortened)) – \(first.end.formatted(date: .omitted, time: .shortened))")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
+                    HStack(spacing: 12) {
+                        ZStack {
+                            RoundedRectangle(cornerRadius: 12)
+                                .fill(DesignPalette.cream)
+                            Image("event-icon")
+                                .renderingMode(.template)
+                                .resizable()
+                                .scaledToFit()
+                                .frame(width: 19, height: 19)
+                                .foregroundStyle(DesignPalette.secondary)
                         }
-                        Spacer()
+                        .frame(width: 36, height: 36)
+
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(first.title)
+                                .font(DesignPalette.body(14).weight(.bold))
+                                .foregroundStyle(DesignPalette.ink)
+                                .lineLimit(2)
+                            Text("\(first.start.formatted(date: .omitted, time: .shortened)) – \(first.end.formatted(date: .omitted, time: .shortened))")
+                                .font(DesignPalette.body(11))
+                                .foregroundStyle(DesignPalette.secondary)
+                        }
+                        Spacer(minLength: 4)
                         Text("\(items.count - 1) more")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                        Image(systemName: "chevron.right")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
+                            .font(DesignPalette.body(11).weight(.semibold))
+                            .foregroundStyle(DesignPalette.secondary)
+                        Image("right-icon-1")
+                            .renderingMode(.template)
+                            .resizable()
+                            .scaledToFit()
+                            .frame(width: 17, height: 17)
+                            .foregroundStyle(DesignPalette.secondary)
                     }
-                    .padding(.vertical, 8)
-                    .padding(.horizontal, 8)
-                    .background(
-                        Color(UIColor.quaternarySystemFill),
-                        in: RoundedRectangle(cornerRadius: 8)
-                    )
+                    .padding(14)
+                    .background(DesignPalette.card, in: RoundedRectangle(cornerRadius: 15))
                 }
                 .buttonStyle(.plain)
             }
@@ -1093,8 +1307,7 @@ private var dayContent: some View {
             event,
             ignored: ignored,
             completed: completed,
-            isApp: isApp,
-            isAppBlock: isAppBlock
+            isApp: isApp
         )
 
         if isApp && !isAppBlock {
@@ -1158,53 +1371,63 @@ private var dayContent: some View {
         _ event: CalendarEventItem,
         ignored: Bool,
         completed: Bool,
-        isApp: Bool,
-        isAppBlock: Bool
+        isApp: Bool
     ) -> some View {
-        HStack(spacing: 10) {
-            RoundedRectangle(cornerRadius: 2)
-                .fill(completed ? Color.green : (isApp ? Color.accentColor : .gray))
-                .frame(width: 4)
-            VStack(alignment: .leading, spacing: 2) {
+        HStack(spacing: 12) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 12)
+                    .fill(isApp ? DesignPalette.sage : DesignPalette.cream)
+                Image(isApp ? "check-icon" : "event-icon")
+                    .renderingMode(.template)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 19, height: 19)
+                    .foregroundStyle(isApp ? DesignPalette.primary : DesignPalette.secondary)
+            }
+            .frame(width: 36, height: 36)
+
+            VStack(alignment: .leading, spacing: 3) {
                 Text(event.title)
-                    .font(.subheadline)
-                    .lineLimit(1)
+                    .font(DesignPalette.body(14).weight(.bold))
+                    .foregroundStyle(DesignPalette.ink)
+                    .lineLimit(2)
                     .strikethrough(ignored || completed)
                 Text("\(event.start.formatted(date: .omitted, time: .shortened)) – \(event.end.formatted(date: .omitted, time: .shortened))")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .font(DesignPalette.body(11))
+                    .foregroundStyle(DesignPalette.secondary)
             }
-            Spacer()
-            if ignored {
-                Image(systemName: "nosign")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            } else if isAppBlock {
-                Image(systemName: "pencil")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            } else if isApp {
+
+            Spacer(minLength: 4)
+
+            if isApp {
                 if completed {
                     Image(systemName: "checkmark.circle.fill")
-                        .font(.caption)
-                        .foregroundStyle(.green)
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(DesignPalette.primary)
                 } else {
-                    Image(systemName: "checklist")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                    Image("right-icon-1")
+                        .renderingMode(.template)
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: 17, height: 17)
+                        .foregroundStyle(DesignPalette.secondary)
                 }
             } else {
-                Text("Ignore")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                VStack(spacing: 4) {
+                    Text("Ignore")
+                        .font(DesignPalette.body(10).weight(.semibold))
+                        .foregroundStyle(DesignPalette.secondary)
+                    if ignored {
+                        Image(systemName: "nosign")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(DesignPalette.secondary)
+                    }
+                }
             }
         }
-        .padding(.vertical, 8)
-        .padding(.horizontal, 8)
-        .background(
-            (ignored ? Color.secondary.opacity(0.12) : Color(UIColor.quaternarySystemFill)),
-            in: RoundedRectangle(cornerRadius: 8)
-        )
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(ignored ? DesignPalette.background : DesignPalette.card, in: RoundedRectangle(cornerRadius: 15))
     }
 
     // MARK: - Data loading

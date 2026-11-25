@@ -31,7 +31,8 @@ extension AppDelegate: UNUserNotificationCenterDelegate {
         _ center: UNUserNotificationCenter,
         willPresent notification: UNNotification
     ) async -> UNNotificationPresentationOptions {
-        [.banner, .sound]
+        guard NotificationService.notificationsAllowed() else { return [] }
+        return [.banner, .sound]
     }
 
     func userNotificationCenter(

@@ -39,10 +39,23 @@ final class NotificationService {
     private(set) var lastDeepLink: Date?
 
     private struct RescheduleContext {
+        var tasks: [TaskItem]
+        var events: [CalendarEventItem]
         var workHoursStart: Double
         var workHoursEnd: Double
         var morningMessage: String?
         var blocks: [CalendarBlock]
+    }
+
+    /// Local reminders are quiet for the whole focus session, including pauses.
+    /// Keeping this as a pure predicate makes the rule testable without scheduling
+    /// real notifications.
+    @MainActor static func notificationsAllowed() -> Bool {
+        notificationsAllowed(timerStartedAt: FocusTimerStarter.startedAt)
+    }
+
+    @MainActor static func notificationsAllowed(timerStartedAt: TimeInterval) -> Bool {
+        timerStartedAt <= 0
     }
 
     private var lastRescheduleContext: RescheduleContext?
@@ -158,6 +171,8 @@ final class NotificationService {
         morningMessage: String?
     ) {
         lastRescheduleContext = RescheduleContext(
+            tasks: tasks,
+            events: events,
             workHoursStart: workHoursStart,
             workHoursEnd: workHoursEnd,
             morningMessage: morningMessage,
@@ -165,6 +180,7 @@ final class NotificationService {
         )
         let center = UNUserNotificationCenter.current()
         center.removeAllPendingNotificationRequests()
+        guard Self.notificationsAllowed() else { return }
         guard authorizationStatus == .authorized || authorizationStatus == .provisional else {
             return
         }
@@ -175,6 +191,22 @@ final class NotificationService {
         scheduleFocusNudges(blocks: blocks, hasOngoingFocus: hasOngoingFocus)
         scheduleBlockCompletionReminders(blocks: blocks)
         scheduleHourlyNudges(workHoursStart: workHoursStart, workHoursEnd: workHoursEnd)
+    }
+
+    /// Called when the focus timer starts or stops. Clears anything already
+    /// scheduled when the session begins and rebuilds reminders once it ends.
+    func syncForFocusTimer() {
+        UNUserNotificationCenter.current().removeAllPendingNotificationRequests()
+        guard Self.notificationsAllowed(), let context = lastRescheduleContext else { return }
+        scheduleAll(
+            tasks: context.tasks,
+            events: context.events,
+            blocks: context.blocks,
+            workHoursStart: context.workHoursStart,
+            workHoursEnd: context.workHoursEnd,
+            hasOngoingFocus: false,
+            morningMessage: context.morningMessage
+        )
     }
 
     private func scheduleTaskReminders(tasks: [TaskItem]) {
