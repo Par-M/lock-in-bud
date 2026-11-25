@@ -53,21 +53,21 @@ export function CalendarAvailability({ value, onChange }: { value: CalendarAvail
           });
           if (!response.ok) {
             if (response.status === 401) token.current = null;
-            throw new Error(`Google Calendar request failed (${response.status}). Check consent, Calendar API enablement and OAuth configuration; reconnect if access expired.`);
+            throw new Error(`Couldn’t read Google Calendar (error ${response.status}). Reconnect and try again.`);
           }
           const data = await response.json() as { items?: T[]; nextPageToken?: string };
-          if (!Array.isArray(data.items) && data.items !== undefined) throw new Error("Google returned an invalid calendar response.");
+          if (!Array.isArray(data.items) && data.items !== undefined) throw new Error("Google returned calendar data the app couldn’t read. Try again.");
           items.push(...(data.items || []));
           if (!data.nextPageToken) return items;
-          if (seen.has(data.nextPageToken)) throw new Error("Google Calendar pagination repeated. Import was not completed.");
+          if (seen.has(data.nextPageToken)) throw new Error("Google Calendar returned the same page twice. Try again.");
           seen.add(data.nextPageToken);
           pageToken = data.nextPageToken;
         }
-        throw new Error("Google Calendar import exceeded the safety limit of 100 pages. Select fewer calendars.");
+        throw new Error("This calendar has too many events to import. Select fewer calendars.");
       }
       const listed = await pages<GoogleCalendar>("users/me/calendarList", { maxResults: "250", fields: "items(id,summary),nextPageToken" });
       const chosen = (ids ?? listed.map(c => c.id)).filter(id => listed.some(c => c.id === id));
-      if (ids?.some(id => !listed.some(c => c.id === id))) throw new Error("A selected calendar is no longer available. Clear the import and reconnect to select calendars again.");
+      if (ids?.some(id => !listed.some(c => c.id === id))) throw new Error("A selected calendar is no longer available. Clear the import and choose calendars again.");
       const today = new Date();
       today.setHours(0, 0, 0, 0);
       const start = new Date(today);
@@ -86,7 +86,7 @@ export function CalendarAvailability({ value, onChange }: { value: CalendarAvail
           if (!event.start?.dateTime || !event.end?.dateTime) throw new Error("Google returned a timed event without valid start/end times.");
           const eventStart = new Date(event.start.dateTime);
           const eventEnd = new Date(event.end.dateTime);
-          if (!Number.isFinite(+eventStart) || !Number.isFinite(+eventEnd) || eventEnd <= eventStart) throw new Error("Google returned invalid event times.");
+          if (!Number.isFinite(+eventStart) || !Number.isFinite(+eventEnd) || eventEnd <= eventStart) throw new Error("Google returned an event with invalid times. Try again.");
           if (eventStart < end && eventEnd > start) intervals.push({ start: new Date(Math.max(+eventStart, +start)).toISOString(), end: new Date(Math.min(+eventEnd, +end)).toISOString() });
         }
       }
@@ -96,7 +96,7 @@ export function CalendarAvailability({ value, onChange }: { value: CalendarAvail
       setSelected(chosen);
       onChange({ busyTimes: intervals, coverage: chosen.length ? coverage : null, pending: false, error: "" });
     } catch (error) {
-      if (operation === sequence.current) fail(error instanceof Error ? error.message : "Calendar import failed.");
+      if (operation === sequence.current) fail(error instanceof Error ? error.message : "Couldn’t import calendar busy times.");
     } finally {
       if (operation === sequence.current) lock.current = false;
     }
@@ -104,7 +104,7 @@ export function CalendarAvailability({ value, onChange }: { value: CalendarAvail
 
   function connect() {
     if (lock.current) return;
-    if (!clientId || !window.google?.accounts.oauth2) { fail("Google Calendar authorization is unavailable. Check the public client ID and reload."); return; }
+    if (!clientId || !window.google?.accounts.oauth2) { fail("Google Calendar isn’t configured for this site. Check the setup and reload."); return; }
     lock.current = true;
     const operation = ++sequence.current;
     onChange({ ...value, pending: true, error: "" });
@@ -114,28 +114,31 @@ export function CalendarAvailability({ value, onChange }: { value: CalendarAvail
         callback: response => {
           if (operation !== sequence.current) return;
           if (response.error || !response.access_token || !scopes.every(scope => response.scope?.split(" ").includes(scope))) {
-            fail("Google Calendar consent was denied or required read-only scopes were not granted."); return;
+            fail("Google Calendar access wasn’t granted. Try again and allow read-only access."); return;
           }
           token.current = { access: response.access_token, expires: Date.now() + (response.expires_in || 0) * 1000 };
           void load(response.access_token, calendars.length ? selected : undefined);
         },
-        error_callback: error => { if (operation === sequence.current) fail(`Google authorization could not complete (${error.type}). Allow the popup and retry.`); },
+        error_callback: error => { if (operation === sequence.current) fail(`Google Calendar sign-in didn’t finish (${error.type}). Allow the popup and try again.`); },
       }).requestAccessToken({ prompt: "consent" });
-    } catch { fail("Google Calendar authorization could not start. Reload and retry."); }
+    } catch { fail("Google Calendar sign-in couldn’t start. Reload and try again."); }
   }
 
   function reload(ids = selected) {
     if (lock.current) return;
-    if (!token.current || token.current.expires <= Date.now() + 30000) { fail("Google Calendar access has expired. Use Connect Google Calendar to consent again."); return; }
+    if (!token.current || token.current.expires <= Date.now() + 30000) { fail("Google Calendar access expired. Connect again to refresh busy times."); return; }
     void load(token.current.access, ids);
   }
 
   return <section className="card stack" aria-label="External calendar availability" style={{ overflowWrap: "anywhere" }}>
-    <Script src="https://accounts.google.com/gsi/client" onReady={() => setReady(true)} onError={() => fail("Google authorization script could not load. Check your connection and reload the page.")} />
-    <h2>External calendar availability</h2>
-    <p className="muted">Browsers cannot use native EventKit. Import Google Calendar busy times with explicit read-only consent. Only start/end intervals reach the planner, never event names or calendar metadata. Tokens stay in memory; reconnect after a page reload.</p>
-    <p className="muted">Import is a snapshot from yesterday through the next 365 days, not live sync. Free, cancelled and all-day events are excluded. Task deadlines beyond coverage are not protected by this import.</p>
-    {!clientId && <p role="status">Google Calendar import requires NEXT_PUBLIC_GOOGLE_CLIENT_ID, authorized browser origins and an enabled Google Calendar API.</p>}
+    <Script src="https://accounts.google.com/gsi/client" onReady={() => setReady(true)} onError={() => fail("Couldn’t load Google sign-in. Check your connection and reload.")} />
+    <h2>Calendar availability</h2>
+    <p className="muted">Connect Google Calendar so the planner can avoid your busy times. Only event start and end times are imported — never titles, guests, or notes.</p>
+    <details>
+      <summary>How the import works</summary>
+      <p className="muted">This is a snapshot from yesterday through the next 365 days, not a live sync. Free, cancelled, and all-day events are skipped. Access tokens stay in memory, so reconnect after a reload. Deadlines beyond the imported dates aren’t protected.</p>
+    </details>
+    {!clientId && <p role="status">Calendar import isn’t configured for this site yet.</p>}
     <div className="row">
       <button disabled={!clientId || !ready || value.pending} onClick={connect}>Connect Google Calendar</button>
       {!!calendars.length && <button disabled={value.pending} onClick={() => reload()}>Reload busy times</button>}
@@ -150,7 +153,7 @@ export function CalendarAvailability({ value, onChange }: { value: CalendarAvail
       }} /> {calendar.summary}</label>)}
     </fieldset>}
     {value.pending && <p role="status">Importing calendar availability...</p>}
-    {value.coverage && <p role="status">{value.busyTimes.length} busy intervals. Coverage: {new Date(value.coverage.start).toLocaleDateString()} to {new Date(value.coverage.end).toLocaleDateString()} (exclusive). Reload to update.</p>}
+    {value.coverage && <p role="status">{value.busyTimes.length} busy intervals. Imported through {new Date(value.coverage.end).toLocaleDateString()}. Reload to update.</p>}
     {value.error && <p className="error" role="alert">{value.error}</p>}
   </section>;
 }

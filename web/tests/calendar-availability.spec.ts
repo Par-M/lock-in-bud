@@ -51,11 +51,13 @@ test("explicit Google consent imports paginated busy times into identical daily/
   await expect(page.getByText("1 busy intervals.", { exact: false })).toBeVisible();
   await expect(page.getByLabel("Main calendar")).toBeChecked();
   await expect(page.getByLabel("Second calendar")).toBeChecked();
-  await page.getByRole("button", { name: "Generate", exact: true }).click();
+  await expect.poll(() => writes.filter(write => write.path === "/recommendations/daily").at(-1)?.body.busy_times).toEqual([busy]);
   await expect(page.getByRole("button", { name: "Refresh", exact: true })).toBeEnabled();
   await page.getByRole("button", { name: "Generate schedule proposal" }).click();
-  await expect.poll(() => writes.length).toBe(2);
-  expect(writes.map(write => write.body.busy_times)).toEqual([[busy], [busy]]);
+  await expect.poll(() => writes.some(write => write.path === "/schedule/generate")).toBe(true);
+  const dailyWrites = writes.filter(write => write.path === "/recommendations/daily");
+  expect(dailyWrites.at(-1)?.body.busy_times).toEqual([busy]);
+  expect(writes.find(write => write.path === "/schedule/generate")?.body.busy_times).toEqual([busy]);
   expect(JSON.stringify(writes)).not.toContain("Private event name");
   expect(JSON.stringify(writes)).not.toContain("memory-only-token");
   expect(await page.evaluate(() => (window as unknown as { calendarConsentRequests: unknown[] }).calendarConsentRequests)).toEqual([{ scope: scopes, prompt: "consent" }]);
@@ -72,9 +74,7 @@ test("explicit Google consent imports paginated busy times into identical daily/
   await page.getByLabel("Main calendar").uncheck();
   await expect(page.getByText("0 busy intervals.", { exact: false })).toBeVisible();
   await page.getByLabel("Second calendar").uncheck();
-  await page.getByRole("button", { name: "Generate", exact: true }).click();
-  await expect.poll(() => writes.length).toBe(3);
-  expect(writes[2].body.busy_times).toEqual([]);
+  await expect.poll(() => writes.filter(write => write.path === "/recommendations/daily").at(-1)?.body.busy_times).toEqual([]);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 });
 

@@ -40,6 +40,7 @@ struct WeeklyScheduleView: View {
     @State private var showPreferences = false
     @State private var showSettings = false
     @State private var showProposal = false
+    @State private var showAddTask = false
     @State private var busyEvents: [CalendarEventItem] = []
     @State private var errorDismissed = false
     @State private var expandedSlots: Set<String> = []
@@ -157,22 +158,25 @@ struct WeeklyScheduleView: View {
                     }
                     .disabled(scheduleService.isGenerating)
 
-                    Button {
-                        showPreferences = true
+                    Menu {
+                        Button {
+                            showPreferences = true
+                        } label: {
+                            Label("Scheduling preferences", systemImage: "slider.horizontal.3")
+                        }
+                        Button {
+                            showSettings = true
+                        } label: {
+                            Label("Settings", systemImage: "gearshape")
+                        }
+                        Divider()
+                        Button {
+                            Task { await loadData(force: true) }
+                        } label: {
+                            Label("Refresh", systemImage: "arrow.clockwise")
+                        }
                     } label: {
-                        Label("Preferences", systemImage: "gearshape")
-                    }
-
-                    Button {
-                        showSettings = true
-                    } label: {
-                        Label("Settings", systemImage: "slider.horizontal.3")
-                    }
-
-                    Button {
-                        Task { await loadData(force: true) }
-                    } label: {
-                        Label("Refresh", systemImage: "arrow.clockwise")
+                        Label("More", systemImage: "ellipsis.circle")
                     }
                 }
             }
@@ -215,6 +219,9 @@ struct WeeklyScheduleView: View {
             }
             .sheet(isPresented: $showProposal) {
                 ScheduleProposalView()
+            }
+            .sheet(isPresented: $showAddTask) {
+                TaskFormView(mode: .add)
             }
             .sheet(item: $editingBlock) { block in
                 BlockTimeEditorView(block: block)
@@ -502,10 +509,19 @@ private var dayContent: some View {
                     }
 
                     if recommendation.items.isEmpty {
-                        Text("Nothing recommended — no free time or no open tasks.")
-                            .font(.footnote)
-                            .foregroundStyle(.tertiary)
-                            .padding(.vertical, 4)
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Nothing recommended — no free time or no open tasks.")
+                                .font(.footnote)
+                                .foregroundStyle(.tertiary)
+                            Button {
+                                showAddTask = true
+                            } label: {
+                                Label("Add a task", systemImage: "plus")
+                            }
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
+                        }
+                        .padding(.vertical, 4)
                     } else {
                         ForEach(
                             orderStore.reorder(recommendation.items, id: \.id)
@@ -637,7 +653,7 @@ private var dayContent: some View {
                         Text("Doesn't fit this window")
                             .font(.subheadline.weight(.semibold))
                     }
-                    Text("These tasks genuinely can't be fit before their deadlines within this window. Extend work hours in Preferences, free up calendar time, or break them into smaller pieces.")
+                    Text("These tasks can't fit before their deadlines within this window. Adjust your work hours, free up calendar time, or break them into smaller pieces.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                     ForEach(parts) { part in
@@ -670,6 +686,13 @@ private var dayContent: some View {
                             in: RoundedRectangle(cornerRadius: 8)
                         )
                     }
+                    Button {
+                        showPreferences = true
+                    } label: {
+                        Label("Adjust work hours", systemImage: "slider.horizontal.3")
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
                 }
                 .padding()
                 .frame(maxWidth: .infinity, alignment: .leading)

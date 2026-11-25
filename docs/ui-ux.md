@@ -1,6 +1,6 @@
 # Everyday planning experience
 
-Web and iOS open on Schedule. Tasks, Habits, and Focus remain available from navigation. The Today tab and its dashboard have been removed.
+Web and iOS open on Schedule. Tasks, Habits, and Focus remain available from navigation. The Today tab and its dashboard have been removed. Web loads today's recommendations automatically; other dates stay explicit so browsing the calendar does not trigger a request per day.
 
 New task forms show the title, deadline, and estimated time first. More options contains recurrence, priority, categories, notes, and checklists. Events require start and end times. Editing exposes existing advanced values.
 
@@ -10,12 +10,14 @@ Focus timers remain accessible across tabs. Pause persists across reloads and ex
 
 The desktop web assistant opens beside the plan and becomes a modal on smaller screens. Proposed actions have specific confirmation labels. Schedule proposal summaries explain added blocks and preserve fixed events. iOS onboarding is shorter; calendar and notification permissions remain available when configuring those features in Settings.
 
+Sync health stays out of the way: the task sync banner only appears when there are pending changes, conflicts, or an error, and keeps a screen-reader live status when everything is healthy. Scheduling preferences use native time pickers on web rather than decimal hours. iOS keeps Generate plan as the primary Schedule action and moves preferences, settings, and refresh into one menu. Empty recommendation and habit states include a next action instead of a dead end.
+
 The web interface includes improved dark-theme action contrast, keyboard focus restoration, reduced-motion support, and a single-row mobile navigation bar. Native controls retain system accessibility behavior and larger task completion targets.
 
 ## Validation
 
-- Full browser regression suite: 130 passed for the initial UX changes; focused browser checks cover the four-tab navigation, dark theme, timer pause/reload, forms, confirmations, and assistant responsiveness.
-- iOS simulator unit tests: 20 passed; final simulator build also checked.
+- Full browser regression suite: 133 passed, 1 skipped across desktop and mobile, including the new auto-recommendation, sync-status, time-picker, and empty-state behavior. Browser checks also cover the four-tab navigation, dark theme, timer pause/reload, forms, confirmations, and assistant responsiveness.
+- iOS simulator unit tests: 29 passed on iPhone 17 (iOS 27.0); final simulator build also checked.
 - Backend focus API compatibility: 31 passed. No database migration is required by these UI changes.
 
 An iOS release requires a new app build. Simulator testing does not replace physical-device accessibility or notification testing.

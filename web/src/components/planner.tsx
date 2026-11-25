@@ -422,6 +422,14 @@ type Preferences = {
   default_duration_minutes: number;
   default_priority: string;
 };
+const timeInputValue = (hours: number) => {
+  const totalMinutes = Math.max(0, Math.min(24 * 60 - 1, Math.round(hours * 60)));
+  return `${String(Math.floor(totalMinutes / 60)).padStart(2, "0")}:${String(totalMinutes % 60).padStart(2, "0")}`;
+};
+const hoursFromTimeInput = (value: string) => {
+  const [hours, minutes] = value.split(":").map(Number);
+  return (hours || 0) + (minutes || 0) / 60;
+};
 function SchedulingPreferences({ onSaved }: { onSaved: () => void }) {
   const [preferences, setPreferences] = useState<Preferences | null>(null);
   const [loading, setLoading] = useState(true);
@@ -452,8 +460,8 @@ function SchedulingPreferences({ onSaved }: { onSaved: () => void }) {
     if (saving) return;
     const data = new FormData(event.currentTarget);
     const body = {
-      work_hours_start: Number(data.get("work_hours_start")),
-      work_hours_end: Number(data.get("work_hours_end")),
+      work_hours_start: hoursFromTimeInput(String(data.get("work_hours_start") || "")),
+      work_hours_end: hoursFromTimeInput(String(data.get("work_hours_end") || "")),
       buffer_minutes: Number(data.get("buffer_minutes")),
       energy_level: Number(data.get("energy_level")),
       max_daily_hours: Number(data.get("max_daily_hours")),
@@ -499,12 +507,12 @@ function SchedulingPreferences({ onSaved }: { onSaved: () => void }) {
         <form className="stack" onSubmit={submit} onChange={() => setSaved(false)}>
           <fieldset disabled={saving} className="form-grid">
             <label>
-              Work starts (hour)
-              <input required type="number" name="work_hours_start" min={0} max={24} step={0.5} defaultValue={preferences.work_hours_start} />
+              Work starts
+              <input required type="time" name="work_hours_start" step={900} defaultValue={timeInputValue(preferences.work_hours_start)} />
             </label>
             <label>
-              Work ends (hour)
-              <input required type="number" name="work_hours_end" min={0} max={24} step={0.5} defaultValue={preferences.work_hours_end} />
+              Work ends
+              <input required type="time" name="work_hours_end" step={900} defaultValue={timeInputValue(preferences.work_hours_end)} />
             </label>
             <label>
               Buffer minutes
@@ -532,7 +540,7 @@ function SchedulingPreferences({ onSaved }: { onSaved: () => void }) {
             </label>
           </fieldset>
           <p className="muted small">
-            Hours use 24-hour notation in half-hour steps, for example 9.5 = 09:30. These preferences guide scheduling recommendations.
+            These hours define the free time the planner can use each day. The end time must be after the start time.
           </p>
           <button className="primary" disabled={saving}>
             {saving ? "Saving..." : "Save preferences"}
@@ -954,6 +962,17 @@ export default function Planner({ user, onLogout }: { user: { id: string; name: 
       if (token === recommendSequence.current) setRecommendBusy(false);
     }
   }
+  // Load today's advice automatically; other days stay explicit so browsing
+  // the calendar doesn't fire a request for every date.
+  useEffect(() => {
+    if (tab !== "Schedule" || selectedDate !== dateKey(new Date())) return;
+    if (!availabilityCovers(availability, selectedDate)) return;
+    if (recommendations || recommendBusy || recommendError) return;
+    void recommend();
+    // recommend is intentionally omitted: including it would restart the
+    // effect on every render while its request is in flight.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab, selectedDate, availability, reload, recommendations, recommendBusy, recommendError]);
   const displayedTasks = (filter === "archived" ? archivedTasks : tasks).filter(
     (t) =>
       (filter !== "active" || t.status !== "completed") &&
@@ -1185,7 +1204,12 @@ export default function Planner({ user, onLogout }: { user: { id: string; name: 
                   </h2>
                   <span className="muted">{dayEntries.length} events</span>
                 </div>
-                {!dayEntries.length && !loading && !loadError && <p className="empty">No events scheduled. Give your tasks some time.</p>}
+                {!dayEntries.length && !loading && !loadError && (
+                  <div className="empty">
+                    <p>No events scheduled.</p>
+                    <button type="button" onClick={() => setSheet("block")}>Add a block</button>
+                  </div>
+                )}
                 <div className="stack compact">
                   {dayEntries.map((entry) => (
                     <article
@@ -1283,13 +1307,24 @@ export default function Planner({ user, onLogout }: { user: { id: string; name: 
                   </div>
                 )}
                 {recommendBusy && <p role="status">Finding time for your tasks...</p>}
-                {!availability.pending && !availability.error && !availabilityCovers(availability, selectedDate) && <p role="alert">This date is outside imported calendar coverage. Clear the import explicitly to plan without external busy times.</p>}
-                {recommendations?.days
+                {!availability.pending && !availability.error && !availabilityCovers(availability, selectedDate) && <p role="alert">This date is outside your imported calendar. <button type="button" onClick={() => setSheet("settings")}>Review calendar import</button></p>}
+                {!recommendations && !recommendBusy && !recommendError && (
+                  <div className="empty">
+                    <p>No plan for this day yet.</p>
+                    <button type="button" disabled={!availabilityCovers(availability, selectedDate)} onClick={() => void recommend()}>Find time for this day</button>
+                  </div>
+                )}
+                {(recommendations?.days ?? [])
                   .filter((d) => d.date === selectedDate)
                   .map((d) => (
                     <div className="stack compact" key={d.date}>
                       <p className="muted">{d.available_minutes} available minutes</p>
-                      {d.items.length === 0 && <p className="empty">No recommendations for this day.</p>}
+                      {d.items.length === 0 && (
+                        <div className="empty">
+                          <p>No recommendations for this day.</p>
+                          <button type="button" onClick={() => tasks.length ? setTab("Tasks") : openTask()}>{tasks.length ? "Open tasks" : "Add a task"}</button>
+                        </div>
+                      )}
                       {d.items.map((item, i) => (
                         <article className="recommendation" key={`${item.task_id}-${i}`}>
                           <div className="grow">
@@ -1313,10 +1348,13 @@ export default function Planner({ user, onLogout }: { user: { id: string; name: 
                       ))}
                     </div>
                   ))}
-                {recommendations && !recommendations.days.some((d) => d.date === selectedDate) && (
-                  <p className="empty">No recommendations returned for this date.</p>
+                {recommendations && !(recommendations.days ?? []).some((d) => d.date === selectedDate) && (
+                  <div className="empty">
+                    <p>No recommendations for this date.</p>
+                    <button type="button" onClick={() => void recommend()}>Try again</button>
+                  </div>
                 )}
-                {!!recommendations?.unscheduled.length && (
+                {!!recommendations?.unscheduled?.length && (
                   <details>
                     <summary>Could not fit ({recommendations.unscheduled.length})</summary>
                     {recommendations.unscheduled.map((item, i) => (
@@ -1324,6 +1362,7 @@ export default function Planner({ user, onLogout }: { user: { id: string; name: 
                         {item.task_title} · {item.minutes} min
                       </p>
                     ))}
+                    <button type="button" onClick={() => setSheet("settings")}>Adjust work hours</button>
                   </details>
                 )}
               </section>
@@ -1508,6 +1547,7 @@ export default function Planner({ user, onLogout }: { user: { id: string; name: 
               <section className="card empty">
                 <h2>Build a little momentum</h2>
                 <p>Create a habit, then log your daily progress.</p>
+                <button type="button" onClick={() => setSheet("habit")}>Create a habit</button>
               </section>
             )}
             <div className="habit-grid">
