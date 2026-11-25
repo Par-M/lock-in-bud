@@ -72,7 +72,9 @@ async function mock(page: Page) {
           : { ...task("new-task"), ...route.request().postDataJSON() }
         : path === "/preferences"
           ? preferences
-          : path === "/notifications/preferences"
+          : path === "/recommendations/daily"
+            ? { days: [], unscheduled: [] }
+            : path === "/notifications/preferences"
             ? notifications
             : path === "/focus/sessions"
               ? []
@@ -210,17 +212,23 @@ test("daily advice ignores a stale response after changing date and returning", 
   const requested = new Promise<void>((resolve) => {
     started = resolve;
   });
+  let requestCount = 0;
   await page.route("**/api/backend/recommendations/daily", async (route) => {
     const date = route.request().postDataJSON().start_date.slice(0, 10);
-    started();
-    await held;
+    requestCount++;
+    const current = requestCount;
+    if (current === 1) {
+      started();
+      await held;
+    }
+    const title = current === 1 ? "Stale advice" : "Fresh advice";
     await route.fulfill({
       json: {
         days: [
           {
             date,
             available_minutes: 60,
-            items: [{ task_id: "task-1", task_title: "Stale advice", part_title: null, minutes: 60, reason: "old response", start_at: at(9), end_at: at(10) }],
+            items: [{ task_id: "task-1", task_title: title, part_title: null, minutes: 60, reason: current === 1 ? "old response" : "new response", start_at: at(9), end_at: at(10) }],
           },
         ],
         unscheduled: [],
@@ -228,16 +236,16 @@ test("daily advice ignores a stale response after changing date and returning", 
     });
   });
   await page.goto("/"); await page.getByRole("navigation").getByRole("button", { name: "Schedule", exact: true }).click();
-  await page.getByRole("button", { name: "Generate", exact: true }).click();
   await requested;
   const calendar = page.getByRole("region", { name: "Month calendar" });
   await calendar.locator('button[aria-pressed="false"]').first().click();
-  await page.getByRole("button", { name: "Go to today" }).click();
   const response = page.waitForResponse("**/api/backend/recommendations/daily");
-  release();
+  await page.getByRole("button", { name: "Go to today" }).click();
   await response;
-  await expect(page.getByRole("button", { name: "Generate", exact: true })).toBeEnabled();
+  release();
   await expect(page.getByText("Stale advice")).toHaveCount(0);
+  await expect(page.getByText("Fresh advice")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Refresh", exact: true })).toBeEnabled();
 });
 
 test("task defaults, description search, explicit status transitions and actual time", async ({ page }) => {
@@ -428,7 +436,7 @@ test("block completion, reopening and deletion use explicit routes", async ({ pa
   await page.getByRole("button", { name: "Delete block Report time" }).click();
   await page.getByRole("dialog", { name: "Confirm action" }).getByRole("button", { name: "Confirm", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Report time", exact: true })).toHaveCount(0);
-  expect(writes.map((w) => w.path)).toEqual(["/calendar/blocks/block-1/complete", "/calendar/blocks/block-1/reopen", "/calendar/blocks/block-1"]);
+  expect(writes.filter((w) => w.path !== "/recommendations/daily").map((w) => w.path)).toEqual(["/calendar/blocks/block-1/complete", "/calendar/blocks/block-1/reopen", "/calendar/blocks/block-1"]);
 });
 
 test("moved repeat overrides and overnight spillovers retain original occurrence date", async ({ page }) => {
@@ -640,7 +648,7 @@ test("independent category suggestions persist per account, remove labels only f
   await page.getByRole("button", { name: "Open settings" }).click();
   await expect(dialog.getByRole("button", { name: "Remove category suggestion Study" })).toHaveCount(0);
   await expect(dialog.getByRole("button", { name: "Remove category suggestion Work" })).toBeVisible();
-  expect(writes).toEqual([]);
+  expect(writes.filter((write) => write.path !== "/recommendations/daily")).toEqual([]);
 });
 
 test("category storage failures preserve input and do not claim a saved suggestion", async ({ page }) => {
@@ -709,28 +717,25 @@ test("offline task-change events reload tasks, ignore superseded reads, and do n
   expect(reads).toBe(initialReads + 2);
 });
 
-test("scheduling preferences accept 24-hour boundaries but reject reversed hours and values above 24", async ({ page }) => {
+test("scheduling preferences use time pickers and reject reversed hours", async ({ page }) => {
   const writes = await mock(page);
   await page.goto("/"); await page.getByRole("navigation").getByRole("button", { name: "Schedule", exact: true }).click();
   await page.getByRole("button", { name: "Open settings" }).click();
   const dialog = page.getByRole("dialog", { name: "Settings", exact: true });
-  const start = dialog.getByLabel("Work starts (hour)", { exact: true });
-  const end = dialog.getByLabel("Work ends (hour)", { exact: true });
-  await expect(start).toHaveAttribute("max", "24");
-  await expect(end).toHaveAttribute("max", "24");
-  await start.fill("24");
-  await end.fill("24");
+  const start = dialog.getByLabel("Work starts", { exact: true });
+  const end = dialog.getByLabel("Work ends", { exact: true });
+  await expect(start).toHaveAttribute("type", "time");
+  await expect(start).toHaveValue("09:00");
+  await expect(end).toHaveValue("17:00");
+  await start.fill("18:00");
+  await end.fill("09:00");
   await dialog.getByRole("button", { name: "Save preferences", exact: true }).click();
   await expect(dialog.getByRole("alert")).toContainText("Work hours must end after they start");
   expect(writes.filter((write) => write.path === "/preferences")).toEqual([]);
-  await start.fill("0");
-  await end.fill("25");
-  expect(await end.evaluate((input) => (input as HTMLInputElement).validity.rangeOverflow)).toBe(true);
-  await dialog.getByRole("button", { name: "Save preferences", exact: true }).click();
-  expect(writes.filter((write) => write.path === "/preferences")).toEqual([]);
-  await end.fill("24");
+  await start.fill("00:00");
+  await end.fill("23:30");
   await dialog.getByRole("button", { name: "Save preferences", exact: true }).click();
   await expect(dialog.getByText("Preferences saved.", { exact: true })).toBeVisible();
   await expect(dialog.getByRole("button", { name: "Save preferences", exact: true })).toBeEnabled();
-  expect(writes.find((write) => write.path === "/preferences")?.body).toMatchObject({ work_hours_start: 0, work_hours_end: 24 });
+  expect(writes.find((write) => write.path === "/preferences")?.body).toMatchObject({ work_hours_start: 0, work_hours_end: 23.5 });
 });

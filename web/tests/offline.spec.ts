@@ -160,7 +160,7 @@ test("a lost push response retries the exact operation ID and payload", async ({
   await page.goto("/"); await tasks(page); await warmDefaults(page);
   state.loseNextPush = true;
   await create(page, "Uncertain create");
-  await expect(page.getByRole("region", { name: "Task sync status" })).toContainText("not confirmed on the server");
+  await expect(page.getByRole("region", { name: "Task sync status" })).toContainText("waiting to sync");
   await page.getByRole("button", { name: "Retry task sync", exact: true }).click();
   await expect(page.getByRole("region", { name: "Task sync status" })).toContainText("No pending task changes");
   expect(state.pushes).toHaveLength(2);
@@ -354,7 +354,7 @@ test.describe("production offline app shell", () => {
     await page.getByRole("textbox", { name: "Title", exact: true }).fill("Cold reload edit");
     await page.getByRole("button", { name: "Save changes", exact: true }).click();
     await expect(page.getByRole("button", { name: "Cold reload edit", exact: true })).toBeVisible();
-    await expect(page.getByRole("region", { name: "Task sync status" })).toContainText("saved on this device, not confirmed on the server");
+    await expect(page.getByRole("region", { name: "Task sync status" })).toContainText("saved on this device");
     const queued = (await snapshot(page)).outbox[0].operation;
     expect(queued.payload.id).toBe(taskId); expect(queued.base_revision).toBe(7);
     expect(state.pushes).toEqual([]);

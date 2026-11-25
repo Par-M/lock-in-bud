@@ -292,7 +292,7 @@ struct TaskListView: View {
         Task {
             defer { savingRows.remove(task.id) }
             do { _ = try await taskService.setStatus(status, for: task) }
-            catch { rowIssues[task.id] = "Couldn’t update this task. Your changes were not confirmed; retry the action." }
+            catch { rowIssues[task.id] = "Couldn’t update this task. Try again." }
         }
     }
 
@@ -304,7 +304,7 @@ struct TaskListView: View {
             category: task.category
         )
         if !wasRunning, task.status == .pending {
-            Task { do { _ = try await taskService.startTask(id: task.id) } catch { rowError = "Timer started. Task status could not be updated; check the task when online." } }
+            Task { do { _ = try await taskService.startTask(id: task.id) } catch { rowError = "Timer started. Couldn’t update the task status; try again when online." } }
         }
         NotificationCenter.default.post(name: .openFocus, object: nil)
     }
