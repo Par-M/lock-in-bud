@@ -39,30 +39,32 @@ struct FocusView: View {
 
             VStack(spacing: 8) {
                 Text(task.title)
-                    .font(.headline)
+                    .font(DesignPalette.screenTitle(22))
+                    .foregroundStyle(DesignPalette.ink)
                     .multilineTextAlignment(.center)
                 if let category = task.category, !category.isEmpty {
                     Text(category)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .font(DesignPalette.body(12))
+                        .foregroundStyle(DesignPalette.secondary)
                 }
             }
 
             ZStack {
                 Circle()
-                    .stroke(.quaternary, lineWidth: 12)
+                    .stroke(DesignPalette.sage, lineWidth: 12)
                 Circle()
                     .trim(from: 0, to: progress)
-                    .stroke(Color.accentColor, style: StrokeStyle(lineWidth: 12, lineCap: .round))
+                    .stroke(DesignPalette.primary, style: StrokeStyle(lineWidth: 12, lineCap: .round))
                     .rotationEffect(.degrees(-90))
 
                 VStack(spacing: 4) {
                     Text(formatted(remaining))
                         .font(.system(size: 44, weight: .bold, design: .rounded))
                         .monospacedDigit()
+                        .foregroundStyle(DesignPalette.ink)
                     Text(isPaused ? "Paused" : "Focusing")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .font(DesignPalette.body(12))
+                        .foregroundStyle(DesignPalette.secondary)
                 }
             }
             .frame(width: 240, height: 240)
@@ -77,9 +79,8 @@ struct FocusView: View {
                     } label: {
                         Label(isPaused ? "Resume" : "Pause", systemImage: isPaused ? "play.fill" : "pause.fill")
                             .frame(maxWidth: .infinity)
-                            .padding(.vertical, 12)
                     }
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(AppPrimaryButtonStyle())
                     .disabled(isSubmitting)
 
                     Button {
@@ -87,19 +88,20 @@ struct FocusView: View {
                     } label: {
                         Text("Finish Early")
                             .frame(maxWidth: .infinity)
-                            .padding(.vertical, 12)
                     }
-                    .buttonStyle(.bordered)
+                    .buttonStyle(AppSecondaryButtonStyle())
                     .disabled(isSubmitting)
                 } else {
                     ProgressView()
                         .controlSize(.large)
+                        .tint(DesignPalette.primary)
                 }
             }
-            .padding(.horizontal, 24)
+            .padding(.horizontal, DesignPalette.pagePadding)
 
             Spacer()
         }
+        .appBackdrop()
         .navigationBarTitleDisplayMode(.inline)
         .onAppear(perform: beginFocus)
         .onReceive(timer) { _ in

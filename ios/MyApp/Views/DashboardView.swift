@@ -1,9 +1,5 @@
 import SwiftUI
-
-private enum TabBarColor {
-    static let lime = Color(red: 184 / 255, green: 217 / 255, blue: 109 / 255)
-    static let inactiveLabel = Color(red: 199 / 255, green: 208 / 255, blue: 191 / 255)
-}
+import UIKit
 
 struct DashboardView: View {
     private enum Tab: Hashable {
@@ -19,7 +15,30 @@ struct DashboardView: View {
     @Environment(ConnectivityMonitor.self) private var connectivity
     @Environment(NotificationService.self) private var notificationService
     @State private var selectedTab: Tab = .schedule
-    @ScaledMetric(relativeTo: .caption2) private var tabIconSize: CGFloat = 21
+
+    init() {
+        let background = UIColor(red: 0xF3 / 255, green: 0xF3 / 255, blue: 0xEB / 255, alpha: 1)
+        let primary = UIColor(red: 0x3E / 255, green: 0x66 / 255, blue: 0x3C / 255, alpha: 1)
+        let secondary = UIColor(red: 0x66 / 255, green: 0x70 / 255, blue: 0x60 / 255, alpha: 1)
+
+        let appearance = UITabBarAppearance()
+        appearance.configureWithOpaqueBackground()
+        appearance.backgroundColor = background
+        appearance.shadowColor = UIColor.black.withAlphaComponent(0.08)
+
+        let item = UITabBarItemAppearance()
+        item.normal.iconColor = secondary
+        item.normal.titleTextAttributes = [.foregroundColor: secondary]
+        item.selected.iconColor = primary
+        item.selected.titleTextAttributes = [.foregroundColor: primary]
+
+        appearance.stackedLayoutAppearance = item
+        appearance.inlineLayoutAppearance = item
+        appearance.compactInlineLayoutAppearance = item
+
+        UITabBar.appearance().standardAppearance = appearance
+        UITabBar.appearance().scrollEdgeAppearance = appearance
+    }
 
     var body: some View {
         TabView(selection: $selectedTab) {
@@ -47,25 +66,6 @@ struct DashboardView: View {
                 }
                 .tag(Tab.focus)
         }
-        .toolbar(.hidden, for: .tabBar)
-        .safeAreaInset(edge: .bottom, spacing: 0) {
-            VStack(spacing: 8) {
-                HStack(spacing: 0) {
-                    tabButton(title: "Schedule", icon: "calendar-icon-9bfd7acb", tab: .schedule)
-                    tabButton(title: "Tasks", icon: "tasks-icon", tab: .tasks)
-                    tabButton(title: "Habits", icon: "habit-icon-e48140e1", tab: .habits)
-                    tabButton(title: "Focus", icon: "focus-icon-b6adf5d7", tab: .focus)
-                }
-                .padding(.horizontal, 7)
-                .padding(.vertical, 6)
-                .frame(maxWidth: 370, minHeight: 70)
-                .background(DesignPalette.ink, in: RoundedRectangle(cornerRadius: 24))
-                .frame(maxWidth: .infinity)
-            }
-            .frame(maxWidth: .infinity)
-            .padding(.horizontal, 16)
-            .padding(.bottom, 6)
-        }
         .safeAreaInset(edge: .top) {
             VStack(spacing: 4) {
                 if !connectivity.isConnected || sync.pendingCount > 0 || sync.isSyncing || sync.lastSyncError != nil {
@@ -82,35 +82,5 @@ struct DashboardView: View {
         .onChange(of: timerStart) { _, _ in
             notificationService.syncForFocusTimer()
         }
-    }
-
-    private func tabButton(title: String, icon: String, tab: Tab) -> some View {
-        let isSelected = selectedTab == tab
-
-        return Button {
-            selectedTab = tab
-        } label: {
-            VStack(spacing: 4) {
-                Image(icon)
-                    .renderingMode(.template)
-                    .resizable()
-                    .scaledToFit()
-                    .frame(width: tabIconSize, height: tabIconSize)
-                Text(title)
-                    .font(.caption2.weight(.semibold))
-                    .minimumScaleFactor(0.8)
-                    .lineLimit(1)
-            }
-            .foregroundStyle(isSelected ? DesignPalette.ink : TabBarColor.inactiveLabel)
-            .frame(maxWidth: .infinity, minHeight: 56, maxHeight: 56)
-            .background(
-                RoundedRectangle(cornerRadius: 16)
-                    .fill(isSelected ? TabBarColor.lime : Color.clear)
-            )
-            .contentShape(RoundedRectangle(cornerRadius: 16))
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel(title)
-        .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 }

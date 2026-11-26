@@ -24,86 +24,119 @@ struct TaskDetailView: View {
     }
 
     var body: some View {
-        List {
-            Section {
-                Text(currentTask.title)
-                    .font(.title2.bold())
-                if let description = currentTask.description, !description.isEmpty {
-                    Text(description)
-                        .foregroundStyle(.secondary)
-                }
-            }
+        ScrollView {
+            VStack(alignment: .leading, spacing: 20) {
+                AppHeader(eyebrow: "TASK", title: currentTask.title)
 
-            if !currentTask.isArchived && currentTask.completedAt == nil {
-                Section("Time and completion") {
-                    if let estimated = currentTask.estimatedDuration, estimated > 0 {
-                        CompletenessSlider(
-                            estimatedMinutes: estimated,
-                            completedMinutes: Binding(
-                                get: { currentTask.actualDuration ?? 0 },
-                                set: { currentTask.actualDuration = $0 }
-                            ),
-                            onCommit: { minutes in
-                                Task {
-                                    await saveCompletedMinutes(minutes)
+                AppCard(padding: 16) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text(currentTask.title)
+                            .font(DesignPalette.screenTitle(20))
+                            .foregroundStyle(DesignPalette.ink)
+                        if let description = currentTask.description, !description.isEmpty {
+                            Text(description)
+                                .font(DesignPalette.body(13))
+                                .foregroundStyle(DesignPalette.mutedInk)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+
+                if !currentTask.isArchived && currentTask.completedAt == nil {
+                    detailSection("TIME AND COMPLETION") {
+                        if let estimated = currentTask.estimatedDuration, estimated > 0 {
+                            CompletenessSlider(
+                                estimatedMinutes: estimated,
+                                completedMinutes: Binding(
+                                    get: { currentTask.actualDuration ?? 0 },
+                                    set: { currentTask.actualDuration = $0 }
+                                ),
+                                onCommit: { minutes in
+                                    Task {
+                                        await saveCompletedMinutes(minutes)
+                                    }
+                                }
+                            )
+                        } else {
+                            HStack {
+                                Text("\(currentTask.progressPercent)%")
+                                    .font(DesignPalette.screenTitle(20))
+                                    .monospacedDigit()
+                                    .foregroundStyle(DesignPalette.ink)
+                                Spacer()
+                                Text("Scheduled blocks completed")
+                                    .font(DesignPalette.body(12))
+                                    .foregroundStyle(DesignPalette.secondary)
+                            }
+                            ProgressView(value: Double(currentTask.progressPercent), total: 100)
+                                .tint(DesignPalette.primary)
+                        }
+
+                        if currentTask.status != .completed {
+                            Button {
+                                markComplete()
+                            } label: {
+                                HStack {
+                                    Label(
+                                        currentTask.repeatWeekdays?.isEmpty == false ? "Complete today’s occurrence" : "Mark Complete",
+                                        systemImage: "checkmark.circle.fill"
+                                    )
+                                    .font(DesignPalette.body(14).weight(.semibold))
+                                    .frame(maxWidth: .infinity)
                                 }
                             }
+                            .buttonStyle(AppPrimaryButtonStyle())
+                            .accessibilityIdentifier("completeTaskButton")
+                        }
+                    }
+                }
+
+                detailSection("DETAILS") {
+                    detailRow("Status", currentTask.status.label)
+                    Divider().background(DesignPalette.cream)
+                    detailRow("Priority", currentTask.priority.label)
+                    if let deadline = currentTask.deadline {
+                        Divider().background(DesignPalette.cream)
+                        detailRow(
+                            "Deadline",
+                            deadline.formatted(date: .abbreviated, time: .shortened)
                         )
-                    } else {
-                        HStack {
-                            Text("\(currentTask.progressPercent)%")
-                                .font(.title3.weight(.semibold))
-                                .monospacedDigit()
-                            Spacer()
-                            Text("Scheduled blocks completed")
-                                .font(.footnote)
-                                .foregroundStyle(.secondary)
+                    }
+                    if let duration = currentTask.estimatedDuration {
+                        Divider().background(DesignPalette.cream)
+                        detailRow("Duration", "\(duration) min")
+                    }
+                    if let category = currentTask.category, !category.isEmpty {
+                        Divider().background(DesignPalette.cream)
+                        detailRow("Category", category)
+                    }
+                }
+
+                detailSection("NOTES & CHECKLIST") {
+                    TextEditor(text: $notesDraft)
+                        .font(DesignPalette.body(14))
+                        .foregroundStyle(DesignPalette.ink)
+                        .scrollContentBackground(.hidden)
+                        .background(DesignPalette.background, in: RoundedRectangle(cornerRadius: DesignPalette.compactRadius))
+                        .frame(minHeight: 100)
+                        .tint(DesignPalette.primary)
+                        .onChange(of: notesDraft) { _, _ in
+                            scheduleSave()
                         }
-                        ProgressView(value: Double(currentTask.progressPercent), total: 100)
-                    }
-
-                    if currentTask.status != .completed {
-                        Button {
-                            markComplete()
-                        } label: {
-                            Label(currentTask.repeatWeekdays?.isEmpty == false ? "Complete today’s occurrence" : "Mark Complete", systemImage: "checkmark.circle.fill")
-                                .frame(maxWidth: .infinity)
-                        }
-                        .buttonStyle(.borderedProminent)
-                        .tint(.green)
-                        .accessibilityIdentifier("completeTaskButton")
-                    }
+                    Divider().background(DesignPalette.cream)
+                    TaskChecklistEditor(items: $checklistDraft, onSave: scheduleSave)
                 }
             }
-
-            Section("Details") {
-                LabeledContent("Status", value: currentTask.status.label)
-                LabeledContent("Priority", value: currentTask.priority.label)
-                if let deadline = currentTask.deadline {
-                    LabeledContent(
-                        "Deadline",
-                        value: deadline.formatted(date: .abbreviated, time: .shortened)
-                    )
-                }
-                if let duration = currentTask.estimatedDuration {
-                    LabeledContent("Duration", value: "\(duration) min")
-                }
-                if let category = currentTask.category, !category.isEmpty {
-                    LabeledContent("Category", value: category)
-                }
-            }
-
-            Section("Notes & Checklist") {
-                TextEditor(text: $notesDraft)
-                    .frame(minHeight: 100)
-                    .onChange(of: notesDraft) { _, _ in
-                        scheduleSave()
-                    }
-                TaskChecklistEditor(items: $checklistDraft, onSave: scheduleSave)
-            }
+            .padding(.horizontal, DesignPalette.pagePadding)
+            .padding(.top, 12)
+            .padding(.bottom, 24)
         }
+        .appBackdrop()
         .navigationTitle(currentTask.title)
         .navigationBarTitleDisplayMode(.inline)
+        .toolbarBackground(DesignPalette.background, for: .navigationBar)
+        .toolbarBackground(.visible, for: .navigationBar)
+        .tint(DesignPalette.primary)
         .onAppear {
             if !didLoadDrafts {
                 notesDraft = currentTask.notes ?? ""
@@ -152,7 +185,24 @@ struct TaskDetailView: View {
             Text("This cannot be undone.")
         }
         .safeAreaInset(edge: .bottom) {
-            if archiveNotice { HStack { Text(currentTask.isArchived ? "Task archived" : "Task restored"); Spacer(); Button("Undo") { toggleArchive() }.disabled(archiveBusy); Button("Dismiss") { archiveNotice = false } }.padding().background(.regularMaterial) }
+            if archiveNotice {
+                HStack {
+                    Text(currentTask.isArchived ? "Task archived" : "Task restored")
+                        .font(DesignPalette.body(12))
+                        .foregroundStyle(DesignPalette.ink)
+                    Spacer()
+                    Button("Undo") { toggleArchive() }
+                        .disabled(archiveBusy)
+                        .font(DesignPalette.body(12).weight(.semibold))
+                        .foregroundStyle(DesignPalette.primary)
+                    Button("Dismiss") { archiveNotice = false }
+                        .font(DesignPalette.body(12))
+                        .foregroundStyle(DesignPalette.secondary)
+                }
+                .padding()
+                .background(DesignPalette.card, in: RoundedRectangle(cornerRadius: DesignPalette.compactRadius))
+                .padding(.horizontal, DesignPalette.pagePadding)
+            }
         }
         .confirmationDialog(
             "Archive this task?",
@@ -167,8 +217,48 @@ struct TaskDetailView: View {
             Text("Archived tasks are hidden from your lists but can be restored anytime.")
         }
         .safeAreaInset(edge: .top) {
-            if let errorMessage { HStack { Label(errorMessage, systemImage: "exclamationmark.triangle").font(.caption); Button("Dismiss") { self.errorMessage = nil } }.padding().background(.regularMaterial) }
+            if let errorMessage {
+                HStack {
+                    Label(errorMessage, systemImage: "exclamationmark.triangle")
+                        .font(DesignPalette.body(12))
+                    Spacer()
+                    Button("Dismiss") { self.errorMessage = nil }
+                        .font(DesignPalette.body(12).weight(.semibold))
+                }
+                .foregroundStyle(DesignPalette.ink)
+                .padding()
+                .background(DesignPalette.card, in: RoundedRectangle(cornerRadius: DesignPalette.compactRadius))
+                .padding(.horizontal, DesignPalette.pagePadding)
+            }
         }
+    }
+
+    @ViewBuilder
+    private func detailSection<Content: View>(
+        _ title: String,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            AppEyebrow(text: title)
+            AppCard(padding: 14) {
+                content()
+            }
+        }
+    }
+
+    private func detailRow(_ title: String, _ value: String) -> some View {
+        HStack(alignment: .firstTextBaseline) {
+            Text(title)
+                .font(DesignPalette.body(14))
+                .foregroundStyle(DesignPalette.ink)
+            Spacer(minLength: 8)
+            Text(value)
+                .font(DesignPalette.body(13))
+                .foregroundStyle(DesignPalette.mutedInk)
+                .multilineTextAlignment(.trailing)
+                .lineLimit(2)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private func toggleArchive() {

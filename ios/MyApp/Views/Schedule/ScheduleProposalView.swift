@@ -10,19 +10,36 @@ struct ScheduleProposalView: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
+                    AppHeader(eyebrow: "SCHEDULE", title: "Your proposed day.")
+
                     if let error = scheduleService.errorMessage {
-                        Label(error, systemImage: "exclamationmark.triangle")
-                            .foregroundStyle(.red)
+                        AppCard(padding: 14) {
+                            Label(error, systemImage: "exclamationmark.triangle")
+                                .font(DesignPalette.body(12))
+                                .foregroundStyle(.red)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
                     }
+
                     if let message = scheduleService.proposal?.message {
-                        Label(message, systemImage: "sparkles")
-                            .font(.headline)
+                        AppCard(padding: 14) {
+                            Label(message, systemImage: "sparkles")
+                                .font(DesignPalette.body(15).weight(.semibold))
+                                .foregroundStyle(DesignPalette.ink)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
                     }
 
                     if let proposal = scheduleService.proposal {
                         let remaining = proposal.items.filter { !$0.accepted }.count
-                        Text("Review before applying").font(.headline)
-                        Text("Adds \(remaining) proposed time blocks. Fixed events keep their times. Review each placement below; approving does not mark tasks complete.").font(.subheadline).foregroundStyle(.secondary)
+                        VStack(alignment: .leading, spacing: 6) {
+                            AppEyebrow(text: "REVIEW BEFORE APPLYING")
+                            Text("Adds \(remaining) proposed time blocks. Fixed events keep their times. Review each placement below; approving does not mark tasks complete.")
+                                .font(DesignPalette.body(12))
+                                .foregroundStyle(DesignPalette.secondary)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+
                         if proposal.items.isEmpty {
                             ContentUnavailableView(
                                 "Nothing to Schedule",
@@ -42,23 +59,30 @@ struct ScheduleProposalView: View {
                         }
 
                         if let reasoning = proposal.reasoning, !reasoning.isEmpty {
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text("AI Reasoning")
-                                    .font(.subheadline.bold())
-                                Text(reasoning)
-                                    .font(.footnote)
-                                    .foregroundStyle(.secondary)
+                            AppCard(padding: 14) {
+                                VStack(alignment: .leading, spacing: 6) {
+                                    Text("AI Reasoning")
+                                        .font(DesignPalette.body(13).weight(.semibold))
+                                        .foregroundStyle(DesignPalette.ink)
+                                    Text(reasoning)
+                                        .font(DesignPalette.body(12))
+                                        .foregroundStyle(DesignPalette.secondary)
+                                }
+                                .frame(maxWidth: .infinity, alignment: .leading)
                             }
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding()
-                            .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 12))
                         }
                     }
                 }
-                .padding()
+                .padding(.horizontal, DesignPalette.pagePadding)
+                .padding(.top, 12)
+                .padding(.bottom, 24)
             }
+            .appBackdrop()
             .navigationTitle("Proposed Schedule")
             .navigationBarTitleDisplayMode(.inline)
+            .toolbarBackground(DesignPalette.background, for: .navigationBar)
+            .toolbarBackground(.visible, for: .navigationBar)
+            .tint(DesignPalette.primary)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Close") { dismiss() }
@@ -73,37 +97,38 @@ struct ScheduleProposalView: View {
     }
 
     private func proposalItemRow(_ item: ScheduleItem) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(alignment: .top, spacing: 8) {
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack(spacing: 6) {
-                        Text(item.taskTitle)
-                            .font(.headline)
-                        if item.accepted {
-                            Label("Approved", systemImage: "checkmark.circle.fill")
-                                .font(.caption.bold())
-                                .foregroundStyle(.green)
+        AppCard(padding: 14) {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(alignment: .top, spacing: 8) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack(spacing: 6) {
+                            Text(item.taskTitle)
+                                .font(DesignPalette.body(15).weight(.semibold))
+                                .foregroundStyle(DesignPalette.ink)
+                            if item.accepted {
+                                Label("Approved", systemImage: "checkmark.circle.fill")
+                                    .font(DesignPalette.body(11).weight(.semibold))
+                                    .foregroundStyle(DesignPalette.primary)
+                            }
+                        }
+                        Text(item.start.formatted(date: .abbreviated, time: .omitted))
+                            .font(DesignPalette.body(11))
+                            .foregroundStyle(DesignPalette.secondary)
+                        Text("\(item.start.formatted(date: .omitted, time: .shortened)) – \(item.end.formatted(date: .omitted, time: .shortened))")
+                            .font(DesignPalette.body(11))
+                            .foregroundStyle(DesignPalette.secondary)
+                        if !item.reason.isEmpty {
+                            Text(item.reason)
+                                .font(DesignPalette.body(12))
+                                .foregroundStyle(DesignPalette.secondary)
                         }
                     }
-                    Text("\(item.start.formatted(date: .abbreviated, time: .omitted))")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    Text("\(item.start.formatted(date: .omitted, time: .shortened)) – \(item.end.formatted(date: .omitted, time: .shortened))")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    if !item.reason.isEmpty {
-                        Text(item.reason)
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-                    }
+                    Spacer(minLength: 8)
+                    itemActions(item)
                 }
-                Spacer(minLength: 8)
-                itemActions(item)
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding()
-        .background(Color.accentColor.opacity(item.accepted ? 0.04 : 0.08), in: RoundedRectangle(cornerRadius: 12))
         .opacity(item.accepted ? 0.75 : 1)
     }
 
@@ -113,30 +138,33 @@ struct ScheduleProposalView: View {
         if item.accepted {
             Image(systemName: "checkmark.circle.fill")
                 .font(.title2)
-                .foregroundStyle(.green)
+                .foregroundStyle(DesignPalette.primary)
         } else if redoingItemID == item.id {
             ProgressView()
                 .controlSize(.small)
+                .tint(DesignPalette.primary)
         } else {
             VStack(spacing: 6) {
                 Button {
                     Task { await approve(item) }
                 } label: {
                     Label("Approve", systemImage: "checkmark")
+                        .font(DesignPalette.body(11).weight(.semibold))
                         .frame(maxWidth: .infinity)
                 }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
+                .buttonStyle(AppSecondaryButtonStyle())
+                .frame(width: 100)
                 .disabled(isBusy)
 
                 Button {
                     Task { await redo(item) }
                 } label: {
                     Label("Redo", systemImage: "arrow.clockwise")
+                        .font(DesignPalette.body(11).weight(.semibold))
                         .frame(maxWidth: .infinity)
                 }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
+                .buttonStyle(AppSecondaryButtonStyle())
+                .frame(width: 100)
                 .disabled(isBusy)
             }
             .fixedSize(horizontal: true, vertical: false)
@@ -151,8 +179,9 @@ struct ScheduleProposalView: View {
                 Task { await reject(proposal) }
             } label: {
                 Text("Reject")
+                    .frame(maxWidth: .infinity)
             }
-            .buttonStyle(.bordered)
+            .buttonStyle(AppSecondaryButtonStyle())
             .disabled(scheduleService.isSyncing || allAccepted)
 
             if allAccepted {
@@ -162,7 +191,7 @@ struct ScheduleProposalView: View {
                     Text("Done")
                         .frame(maxWidth: .infinity)
                 }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(AppPrimaryButtonStyle())
             } else {
                 Button {
                     Task { await accept(proposal) }
@@ -170,38 +199,39 @@ struct ScheduleProposalView: View {
                     if scheduleService.isSyncing {
                         ProgressView()
                             .frame(maxWidth: .infinity)
+                            .tint(.white)
                     } else {
                         Text("Accept All (\(pendingCount))")
                             .frame(maxWidth: .infinity)
                     }
                 }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(AppPrimaryButtonStyle())
                 .disabled(scheduleService.isSyncing || proposal.items.isEmpty)
             }
         }
         .padding()
-        .background(.bar)
+        .background(DesignPalette.background)
     }
 
     private func overcommitmentBanner(_ meta: ScheduleMeta) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             Label("Not enough free time", systemImage: "exclamationmark.triangle.fill")
-                .font(.subheadline.bold())
+                .font(DesignPalette.body(13).weight(.semibold))
                 .foregroundStyle(.orange)
             if let risk = meta.risk {
                 Text(risk)
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
+                    .font(DesignPalette.body(12))
+                    .foregroundStyle(DesignPalette.secondary)
             }
             if !meta.deferredTasks.isEmpty {
                 Text("Deferred: \(meta.deferredTasks.joined(separator: ", "))")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
+                    .font(DesignPalette.body(12))
+                    .foregroundStyle(DesignPalette.secondary)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding()
-        .background(Color.orange.opacity(0.1), in: RoundedRectangle(cornerRadius: 12))
+        .padding(14)
+        .background(DesignPalette.cream, in: RoundedRectangle(cornerRadius: DesignPalette.cardRadius))
     }
 
     private func approve(_ item: ScheduleItem) async {

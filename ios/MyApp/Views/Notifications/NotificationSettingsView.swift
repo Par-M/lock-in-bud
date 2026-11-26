@@ -26,66 +26,105 @@ struct NotificationSettingsView: View {
     }
 
     var body: some View {
-        Form {
-            Section {
-                permissionRow
-            } header: {
-                Text("Permission")
-            }
+        ScrollView {
+            VStack(alignment: .leading, spacing: 20) {
+                AppHeader(eyebrow: "NOTIFICATIONS", title: "Stay on time.")
 
-            Section {
-                Toggle("Daily briefing", isOn: $briefingEnabled)
-                if briefingEnabled {
-                    DatePicker(
-                        "Briefing time",
-                        selection: $briefingTime,
-                        displayedComponents: .hourAndMinute
-                    )
+                settingSection("PERMISSION") {
+                    permissionRow
                 }
-            } header: {
-                Text("Morning Briefing")
-            }
 
-            Section {
-                Toggle("Deadline reminders", isOn: $deadlineEnabled)
-                if deadlineEnabled {
-                    Stepper(
-                        "Remind \(leadHours) hour\(leadHours == 1 ? "" : "s") before",
-                        value: $leadHours,
-                        in: 1...168
-                    )
+                settingSection("MORNING BRIEFING") {
+                    Toggle("Daily briefing", isOn: $briefingEnabled)
+                        .font(DesignPalette.body(14))
+                        .tint(DesignPalette.primary)
+                    if briefingEnabled {
+                        Divider().background(DesignPalette.cream)
+                        DatePicker(
+                            "Briefing time",
+                            selection: $briefingTime,
+                            displayedComponents: .hourAndMinute
+                        )
+                        .font(DesignPalette.body(14))
+                        .tint(DesignPalette.primary)
+                    }
                 }
-            } header: {
-                Text("Deadline Reminders")
-            }
 
-            Section {
-                Toggle("Overdue alerts", isOn: $overdueEnabled)
-                Toggle("Schedule change alerts", isOn: $rescheduleEnabled)
-            } header: {
-                Text("Alerts")
-            }
+                settingSection("DEADLINE REMINDERS") {
+                    Toggle("Deadline reminders", isOn: $deadlineEnabled)
+                        .font(DesignPalette.body(14))
+                        .tint(DesignPalette.primary)
+                    if deadlineEnabled {
+                        Divider().background(DesignPalette.cream)
+                        Stepper(
+                            "Remind \(leadHours) hour\(leadHours == 1 ? "" : "s") before",
+                            value: $leadHours,
+                            in: 1...168
+                        )
+                        .font(DesignPalette.body(14))
+                        .tint(DesignPalette.primary)
+                    }
+                }
 
-            Section {
-                Button("Save") {
-                    save()
+                settingSection("ALERTS") {
+                    Toggle("Overdue alerts", isOn: $overdueEnabled)
+                        .font(DesignPalette.body(14))
+                        .tint(DesignPalette.primary)
+                    Divider().background(DesignPalette.cream)
+                    Toggle("Schedule change alerts", isOn: $rescheduleEnabled)
+                        .font(DesignPalette.body(14))
+                        .tint(DesignPalette.primary)
                 }
-                .disabled(!didLoad)
-                if saved {
-                    Label("Saved", systemImage: "checkmark.circle.fill")
-                        .font(.caption)
-                        .foregroundStyle(.green)
-                }
-                if let saveError {
-                    Text(saveError)
-                        .font(.caption)
-                        .foregroundStyle(.red)
+
+                AppCard(padding: 14) {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Button {
+                            save()
+                        } label: {
+                            Text("Save")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(AppPrimaryButtonStyle())
+                        .disabled(!didLoad)
+
+                        if saved {
+                            Label("Saved", systemImage: "checkmark.circle.fill")
+                                .font(DesignPalette.body(12))
+                                .foregroundStyle(DesignPalette.primary)
+                        }
+                        if let saveError {
+                            Text(saveError)
+                                .font(DesignPalette.body(12))
+                                .foregroundStyle(.red)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
+            .padding(.horizontal, DesignPalette.pagePadding)
+            .padding(.top, 12)
+            .padding(.bottom, 24)
         }
+        .appBackdrop()
         .navigationTitle("Notifications")
         .navigationBarTitleDisplayMode(.inline)
+        .toolbarBackground(DesignPalette.background, for: .navigationBar)
+        .toolbarBackground(.visible, for: .navigationBar)
+        .tint(DesignPalette.primary)
         .task { await loadInitial() }
+    }
+
+    @ViewBuilder
+    private func settingSection<Content: View>(
+        _ title: String,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            AppEyebrow(text: title)
+            AppCard(padding: 14) {
+                content()
+            }
+        }
     }
 
     @ViewBuilder
@@ -93,20 +132,26 @@ struct NotificationSettingsView: View {
         switch notificationService.authorizationStatus {
         case .authorized, .provisional:
             Label("Notifications enabled", systemImage: "checkmark.circle.fill")
-                .foregroundStyle(.green)
+                .font(DesignPalette.body(14))
+                .foregroundStyle(DesignPalette.primary)
         case .denied:
             HStack {
                 Label("Notifications disabled", systemImage: "bell.slash")
-                    .foregroundStyle(.secondary)
+                    .font(DesignPalette.body(14))
+                    .foregroundStyle(DesignPalette.secondary)
                 Spacer()
                 Button("Open Settings") {
                     if let url = URL(string: UIApplication.openSettingsURLString) {
                         UIApplication.shared.open(url)
                     }
                 }
+                .font(DesignPalette.body(12).weight(.semibold))
+                .foregroundStyle(DesignPalette.primary)
+                .buttonStyle(.plain)
             }
         case .unknown:
             ProgressView()
+                .tint(DesignPalette.primary)
                 .task {
                     await notificationService.refreshAuthorizationStatus()
                 }
@@ -114,8 +159,15 @@ struct NotificationSettingsView: View {
             Button {
                 Task { await notificationService.requestPermission() }
             } label: {
-                Label("Enable notifications", systemImage: "bell.badge")
+                HStack {
+                    Label("Enable notifications", systemImage: "bell.badge")
+                        .font(DesignPalette.body(14).weight(.medium))
+                    Spacer()
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
             }
+            .buttonStyle(.plain)
         }
     }
 

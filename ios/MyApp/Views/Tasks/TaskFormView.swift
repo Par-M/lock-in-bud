@@ -364,9 +364,11 @@ struct TaskFormView: View {
             Text("What would you like to do?")
                 .font(.system(size: 12, weight: .bold, design: .rounded))
                 .foregroundStyle(DesignPalette.ink)
-            TextField("Title", text: $title)
-                .font(.system(size: 16, weight: .medium, design: .rounded))
-                .foregroundStyle(DesignPalette.ink)
+            AppTextField(
+                placeholder: "Title",
+                text: $title,
+                font: .system(size: 16, weight: .medium, design: .rounded)
+            )
                 .padding(.horizontal, 16)
                 .padding(.vertical, 18)
                 .background(DesignPalette.card, in: RoundedRectangle(cornerRadius: 14))
@@ -391,8 +393,12 @@ struct TaskFormView: View {
             if hasDeadline {
                 VStack(spacing: 8) {
                     DatePicker("Date", selection: $deadline, displayedComponents: .date)
+                        .tint(DesignPalette.primary)
+                        .foregroundStyle(DesignPalette.ink)
                     DatePicker("Time", selection: $deadline, displayedComponents: .hourAndMinute)
                         .datePickerStyle(.compact)
+                        .tint(DesignPalette.primary)
+                        .foregroundStyle(DesignPalette.ink)
                 }
                 .padding(.bottom, 16)
             }
@@ -420,6 +426,8 @@ struct TaskFormView: View {
                 TextField("0", value: $durationHours, format: .number)
                     .keyboardType(.numberPad)
                     .textFieldStyle(.roundedBorder)
+                    .tint(DesignPalette.primary)
+                    .foregroundStyle(DesignPalette.ink)
                     .frame(width: 64)
             }
             Text("h")
@@ -431,6 +439,8 @@ struct TaskFormView: View {
                 TextField("0", value: $durationMinutesPart, format: .number)
                     .keyboardType(.numberPad)
                     .textFieldStyle(.roundedBorder)
+                    .tint(DesignPalette.primary)
+                    .foregroundStyle(DesignPalette.ink)
                     .frame(width: 64)
             }
             Text("m")
@@ -536,6 +546,8 @@ struct TaskFormView: View {
                         in: Date()...,
                         displayedComponents: .date
                     )
+                    .tint(DesignPalette.primary)
+                    .foregroundStyle(DesignPalette.ink)
                     .padding(.bottom, 16)
                 }
             }
@@ -595,8 +607,8 @@ struct TaskFormView: View {
                     .buttonStyle(.plain)
                     .accessibilityLabel(item.done ? "Mark as not done" : "Mark as done")
 
-                    TextField(
-                        "Checklist item",
+                    AppTextField(
+                        placeholder: "Checklist item",
                         text: Binding(
                             get: { checklist[index].text },
                             set: {
@@ -605,11 +617,11 @@ struct TaskFormView: View {
                                     done: checklist[index].done
                                 )
                             }
-                        )
+                        ),
+                        font: .system(size: 13, weight: .medium, design: .rounded),
+                        color: item.done ? DesignPalette.secondary : DesignPalette.ink
                     )
-                    .font(.system(size: 13, weight: .medium, design: .rounded))
                     .strikethrough(item.done, color: DesignPalette.secondary)
-                    .foregroundStyle(item.done ? DesignPalette.secondary : DesignPalette.ink)
 
                     Button(role: .destructive) {
                         checklist.remove(at: index)
@@ -628,9 +640,12 @@ struct TaskFormView: View {
                     .scaledToFit()
                     .frame(width: 18, height: 18)
                     .accessibilityHidden(true)
-                TextField("Add a checklist item…", text: $newChecklistItem)
-                    .font(.system(size: 12, weight: .semibold, design: .rounded))
-                    .foregroundStyle(DesignPalette.primary)
+                AppTextField(
+                    placeholder: "Add a checklist item…",
+                    text: $newChecklistItem,
+                    font: .system(size: 12, weight: .semibold, design: .rounded),
+                    color: DesignPalette.primary
+                )
                     .submitLabel(.done)
                     .onSubmit(commitChecklistItem)
                 Button {
@@ -657,9 +672,11 @@ struct TaskFormView: View {
     private var detailsCard: some View {
         VStack(spacing: 0) {
             HStack(spacing: 10) {
-                TextField("Category", text: $category)
-                    .font(.system(size: 13, weight: .medium, design: .rounded))
-                    .foregroundStyle(DesignPalette.ink)
+                AppTextField(
+                    placeholder: "Category",
+                    text: $category,
+                    font: .system(size: 13, weight: .medium, design: .rounded)
+                )
                     .accessibilityIdentifier("categoryField")
                 Image("down-icon-1")
                     .resizable()
@@ -685,9 +702,12 @@ struct TaskFormView: View {
 
             DividerRow()
 
-            TextField("Notes", text: $notes, axis: .vertical)
-                .font(.system(size: 13, weight: .medium, design: .rounded))
-                .foregroundStyle(DesignPalette.ink)
+            AppTextField(
+                placeholder: "Notes",
+                text: $notes,
+                font: .system(size: 13, weight: .medium, design: .rounded),
+                axis: .vertical
+            )
                 .lineLimit(2...6)
                 .padding(.top, 12)
                 .padding(.bottom, 24)

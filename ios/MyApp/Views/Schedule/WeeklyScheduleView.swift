@@ -405,9 +405,48 @@ struct WeeklyScheduleView: View {
         }
     }
 
-    private var weekDays: [Date] {
-        let start = calendar.dateInterval(of: .weekOfYear, for: selectedDate)?.start ?? dayStart
+    private var baseWeekStart: Date {
+        calendar.dateInterval(of: .weekOfYear, for: Date())?.start
+            ?? calendar.startOfDay(for: Date())
+    }
+
+    private func weekStart(at offset: Int) -> Date {
+        calendar.date(byAdding: .day, value: offset * 7, to: baseWeekStart) ?? baseWeekStart
+    }
+
+    private func weekDays(at offset: Int) -> [Date] {
+        let start = weekStart(at: offset)
         return (0..<7).compactMap { calendar.date(byAdding: .day, value: $0, to: start) }
+    }
+
+    private func weekOffset(for date: Date) -> Int {
+        let start = calendar.dateInterval(of: .weekOfYear, for: date)?.start
+            ?? calendar.startOfDay(for: date)
+        let days = calendar.dateComponents([.day], from: baseWeekStart, to: start).day ?? 0
+        return days / 7
+    }
+
+    private var weekOffsets: [Int] {
+        let center = weekOffset(for: selectedDate)
+        return Array((center - 8)...(center + 8))
+    }
+
+    private var pagedWeekSelection: Binding<Int?> {
+        Binding(
+            get: { self.weekOffset(for: self.selectedDate) },
+            set: { newValue in
+                guard let newValue else { return }
+                let delta = newValue - self.weekOffset(for: self.selectedDate)
+                guard delta != 0 else { return }
+                guard let date = self.calendar.date(
+                    byAdding: .day,
+                    value: delta * 7,
+                    to: self.selectedDate
+                ) else { return }
+                self.selectedDate = date
+                self.calendarMonth = date
+            }
+        )
     }
 
     private var monthGrid: some View {
@@ -460,11 +499,23 @@ struct WeeklyScheduleView: View {
                 }
             }
 
-            HStack(spacing: 5) {
-                ForEach(weekDays, id: \.self) { day in
-                    weekCell(day)
+            ScrollView(.horizontal, showsIndicators: false) {
+                LazyHStack(spacing: 0) {
+                    ForEach(weekOffsets, id: \.self) { offset in
+                        HStack(spacing: 5) {
+                            ForEach(weekDays(at: offset), id: \.self) { day in
+                                weekCell(day)
+                            }
+                        }
+                        .containerRelativeFrame(.horizontal)
+                        .padding(.horizontal, 2)
+                    }
                 }
+                .scrollTargetLayout()
             }
+            .scrollTargetBehavior(.paging)
+            .scrollPosition(id: pagedWeekSelection)
+            .frame(height: 76)
 
             if calendarExpanded {
                 HStack(spacing: 0) {

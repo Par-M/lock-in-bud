@@ -11,14 +11,17 @@ struct LoginView: View {
 
             Image(systemName: "calendar.badge.clock")
                 .font(.system(size: 64))
-                .foregroundStyle(.tint)
+                .foregroundStyle(DesignPalette.primary)
+                .frame(width: 104, height: 104)
+                .background(DesignPalette.sage, in: Circle())
 
             VStack(spacing: 8) {
                 Text("Lock In Bud")
-                    .font(.largeTitle.bold())
+                    .font(DesignPalette.screenTitle(34))
+                    .foregroundStyle(DesignPalette.ink)
                 Text("Sign in to continue")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
+                    .font(DesignPalette.body(14))
+                    .foregroundStyle(DesignPalette.secondary)
             }
 
             Spacer()
@@ -31,11 +34,9 @@ struct LoginView: View {
                     Text("Continue with Google")
                 }
                 .frame(maxWidth: .infinity)
-                .padding()
-                .background(Color.blue)
-                .foregroundStyle(.white)
-                .clipShape(RoundedRectangle(cornerRadius: 12))
             }
+            .buttonStyle(AppPrimaryButtonStyle())
+            .padding(.horizontal, DesignPalette.pagePadding)
             .disabled(isLoading)
 
             let devSignInEnabled = ProcessInfo.processInfo.arguments.contains("-uiTesting")
@@ -43,17 +44,19 @@ struct LoginView: View {
                 Button("Development Sign In") {
                     Task { await signInDev() }
                 }
-                .font(.footnote)
+                .font(DesignPalette.body(12).weight(.semibold))
+                .foregroundStyle(DesignPalette.primary)
                 .disabled(isLoading)
             }
 
             if isLoading {
                 ProgressView()
+                    .tint(DesignPalette.primary)
             }
 
             Spacer()
         }
-        .padding()
+        .appBackdrop()
         .alert(
             "Sign In Failed",
             isPresented: Binding(

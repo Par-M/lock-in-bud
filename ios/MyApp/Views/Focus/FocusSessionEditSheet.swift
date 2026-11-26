@@ -23,25 +23,51 @@ struct FocusSessionEditSheet: View {
 
     var body: some View {
         NavigationStack {
-            Form {
-                if let saveError {
-                    Text(saveError).foregroundStyle(.red)
-                }
-                Section("When did it happen?") {
-                    DatePicker("Started", selection: $startDate)
-                    DatePicker("Ended", selection: $endDate)
-                }
+            ScrollView {
+                VStack(alignment: .leading, spacing: 20) {
+                    AppHeader(eyebrow: "FOCUS", title: "Edit session.")
 
-                if !isValid {
-                    Section {
-                        Label("End time must be after start time.", systemImage: "exclamationmark.triangle")
-                            .font(.footnote)
-                            .foregroundStyle(.orange)
+                    VStack(alignment: .leading, spacing: 10) {
+                        AppEyebrow(text: "WHEN DID IT HAPPEN?")
+                        AppCard(padding: 14) {
+                            DatePicker("Started", selection: $startDate)
+                                .font(DesignPalette.body(14))
+                                .tint(DesignPalette.primary)
+                            Divider().background(DesignPalette.cream)
+                            DatePicker("Ended", selection: $endDate)
+                                .font(DesignPalette.body(14))
+                                .tint(DesignPalette.primary)
+                        }
+                    }
+
+                    if !isValid {
+                        AppCard(padding: 14) {
+                            Label("End time must be after start time.", systemImage: "exclamationmark.triangle")
+                                .font(DesignPalette.body(12))
+                                .foregroundStyle(.orange)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                    }
+
+                    if let saveError {
+                        AppCard(padding: 14) {
+                            Text(saveError)
+                                .font(DesignPalette.body(12))
+                                .foregroundStyle(.red)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
                     }
                 }
+                .padding(.horizontal, DesignPalette.pagePadding)
+                .padding(.top, 12)
+                .padding(.bottom, 24)
             }
+            .appBackdrop()
             .navigationTitle("Edit focus session")
             .navigationBarTitleDisplayMode(.inline)
+            .toolbarBackground(DesignPalette.background, for: .navigationBar)
+            .toolbarBackground(.visible, for: .navigationBar)
+            .tint(DesignPalette.primary)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }

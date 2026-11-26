@@ -20,49 +20,102 @@ struct BlockTimeEditorView: View {
 
     var body: some View {
         NavigationStack {
-            Form {
-                Section("Task") {
-                    Text(block.title)
-                }
-                Section("Time") {
-                    DatePicker("Start", selection: $start)
-                    DatePicker("End", selection: $end)
-                    if start >= end {
-                        Text("End must be after start")
-                            .font(.footnote)
-                            .foregroundStyle(.red)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 20) {
+                    AppHeader(eyebrow: "SCHEDULE", title: "Edit block.")
+
+                    settingSection("TASK") {
+                        Text(block.title)
+                            .font(DesignPalette.body(14).weight(.medium))
+                            .foregroundStyle(DesignPalette.ink)
+                            .frame(maxWidth: .infinity, alignment: .leading)
                     }
-                }
-                Section {
-                    if block.completedAt != nil {
-                        Button {
-                            Task { await reopen() }
-                        } label: {
-                            Label("Reopen Block", systemImage: "arrow.uturn.backward.circle")
+
+                    settingSection("TIME") {
+                        DatePicker("Start", selection: $start)
+                            .font(DesignPalette.body(14))
+                            .tint(DesignPalette.primary)
+                        Divider().background(DesignPalette.cream)
+                        DatePicker("End", selection: $end)
+                            .font(DesignPalette.body(14))
+                            .tint(DesignPalette.primary)
+                        if start >= end {
+                            Divider().background(DesignPalette.cream)
+                            Text("End must be after start")
+                                .font(DesignPalette.body(12))
+                                .foregroundStyle(.red)
                         }
-                        .disabled(isSaving)
-                    } else {
+                    }
+
+                    AppCard(padding: 14) {
                         Button {
-                            Task { await complete() }
+                            Task {
+                                if block.completedAt != nil {
+                                    await reopen()
+                                } else {
+                                    await complete()
+                                }
+                            }
                         } label: {
-                            Label("Mark Complete", systemImage: "checkmark.circle")
+                            HStack {
+                                Label(
+                                    block.completedAt != nil ? "Reopen Block" : "Mark Complete",
+                                    systemImage: block.completedAt != nil ? "arrow.uturn.backward.circle" : "checkmark.circle"
+                                )
+                                .font(DesignPalette.body(14).weight(.semibold))
+                                Spacer()
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .contentShape(Rectangle())
                         }
+                        .buttonStyle(.plain)
                         .disabled(isSaving)
                     }
-                }
-                Section {
-                    Button(role: .destructive) {
-                        confirmDelete = true
-                    } label: {
-                        Text("Delete Block")
+
+                    AppCard(padding: 14) {
+                        Button(role: .destructive) {
+                            confirmDelete = true
+                        } label: {
+                            HStack {
+                                Text("Delete Block")
+                                    .font(DesignPalette.body(14).weight(.semibold))
+                                Spacer()
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(isSaving)
                     }
-                    .disabled(isSaving)
-                }
-                if let errorMessage {
-                    Section {
-                        Text(errorMessage)
-                            .foregroundStyle(.red)
+
+                    if let errorMessage {
+                        AppCard(padding: 14) {
+                            Text(errorMessage)
+                                .font(DesignPalette.body(12))
+                                .foregroundStyle(.red)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
                     }
+                }
+                .padding(.horizontal, DesignPalette.pagePadding)
+                .padding(.top, 12)
+                .padding(.bottom, 24)
+            }
+            .appBackdrop()
+            .navigationTitle("Edit Block")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbarBackground(DesignPalette.background, for: .navigationBar)
+            .toolbarBackground(.visible, for: .navigationBar)
+            .tint(DesignPalette.primary)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save") {
+                        Task { await save() }
+                    }
+                    .disabled(start >= end || isSaving)
                 }
             }
             .confirmationDialog(
@@ -77,18 +130,18 @@ struct BlockTimeEditorView: View {
             } message: {
                 Text("This removes \(block.title) from your schedule. This cannot be undone.")
             }
-            .navigationTitle("Edit Block")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { dismiss() }
-                }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Save") {
-                        Task { await save() }
-                    }
-                    .disabled(start >= end || isSaving)
-                }
+        }
+    }
+
+    @ViewBuilder
+    private func settingSection<Content: View>(
+        _ title: String,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            AppEyebrow(text: title)
+            AppCard(padding: 14) {
+                content()
             }
         }
     }

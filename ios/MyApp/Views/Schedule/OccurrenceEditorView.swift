@@ -34,46 +34,80 @@ struct OccurrenceEditorView: View {
 
     var body: some View {
         NavigationStack {
-            Form {
-                Section("Event") {
-                    Text(task.title)
-                }
-                Section {
-                    Button {
-                        Task { await toggleCompletion() }
-                    } label: {
-                        Label(
-                            completionLabel,
-                            systemImage: occurrenceCompleted ? "xmark.circle" : "checkmark.circle"
-                        )
+            ScrollView {
+                VStack(alignment: .leading, spacing: 20) {
+                    AppHeader(eyebrow: "SCHEDULE", title: isRepeating ? "Edit Occurrence" : "Edit Event")
+
+                    settingSection("EVENT") {
+                        Text(task.title)
+                            .font(DesignPalette.body(14).weight(.medium))
+                            .foregroundStyle(DesignPalette.ink)
+                            .frame(maxWidth: .infinity, alignment: .leading)
                     }
-                    .disabled(isSaving)
-                }
-                Section("Time") {
-                    DatePicker("Start", selection: $start)
-                    DatePicker("End", selection: $end)
-                    if start >= end {
-                        Text("End must be after start")
-                            .font(.footnote)
-                            .foregroundStyle(.red)
+
+                    AppCard(padding: 14) {
+                        Button {
+                            Task { await toggleCompletion() }
+                        } label: {
+                            HStack {
+                                Label(
+                                    completionLabel,
+                                    systemImage: occurrenceCompleted ? "xmark.circle" : "checkmark.circle"
+                                )
+                                .font(DesignPalette.body(14).weight(.semibold))
+                                Spacer()
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(isSaving)
+                    }
+
+                    settingSection("TIME") {
+                        DatePicker("Start", selection: $start)
+                            .font(DesignPalette.body(14))
+                            .tint(DesignPalette.primary)
+                        Divider().background(DesignPalette.cream)
+                        DatePicker("End", selection: $end)
+                            .font(DesignPalette.body(14))
+                            .tint(DesignPalette.primary)
+                        if start >= end {
+                            Divider().background(DesignPalette.cream)
+                            Text("End must be after start")
+                                .font(DesignPalette.body(12))
+                                .foregroundStyle(.red)
+                        }
+                    }
+
+                    if isRepeating {
+                        AppCard(padding: 14) {
+                            Text("This event repeats. You'll choose whether the new time applies to today only or to all future events.")
+                                .font(DesignPalette.body(12))
+                                .foregroundStyle(DesignPalette.secondary)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                    }
+
+                    if let errorMessage {
+                        AppCard(padding: 14) {
+                            Text(errorMessage)
+                                .font(DesignPalette.body(12))
+                                .foregroundStyle(.red)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
                     }
                 }
-                if isRepeating {
-                    Section {
-                        Text("This event repeats. You'll choose whether the new time applies to today only or to all future events.")
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-                if let errorMessage {
-                    Section {
-                        Text(errorMessage)
-                            .foregroundStyle(.red)
-                    }
-                }
+                .padding(.horizontal, DesignPalette.pagePadding)
+                .padding(.top, 12)
+                .padding(.bottom, 24)
             }
+            .appBackdrop()
             .navigationTitle(isRepeating ? "Edit Occurrence" : "Edit Event")
             .navigationBarTitleDisplayMode(.inline)
+            .toolbarBackground(DesignPalette.background, for: .navigationBar)
+            .toolbarBackground(.visible, for: .navigationBar)
+            .tint(DesignPalette.primary)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }
@@ -103,6 +137,19 @@ struct OccurrenceEditorView: View {
                 Button("Cancel", role: .cancel) {}
             } message: {
                 Text("Choose how the new time should apply to this repeating event.")
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func settingSection<Content: View>(
+        _ title: String,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            AppEyebrow(text: title)
+            AppCard(padding: 14) {
+                content()
             }
         }
     }

@@ -468,7 +468,7 @@ struct TaskListView: View {
                         confirmSignOut = true
                     }
                 } label: {
-                    Image(systemName: "person.crop.circle")
+                    Image(systemName: "person.fill")
                         .font(.system(size: 18, weight: .semibold))
                         .foregroundStyle(DesignPalette.primary)
                         .frame(width: 44, height: 44)
@@ -547,9 +547,11 @@ struct TaskListView: View {
                     .frame(width: 20, height: 20)
                     .accessibilityHidden(true)
 
-                TextField("Quick add a task…", text: $quickTaskTitle)
-                    .font(.system(size: 14, weight: .medium, design: .rounded))
-                    .foregroundStyle(DesignPalette.ink)
+                AppTextField(
+                    placeholder: "Quick add a task…",
+                    text: $quickTaskTitle,
+                    font: .system(size: 14, weight: .medium, design: .rounded)
+                )
                     .submitLabel(.done)
                     .onSubmit {
                         Task { await addQuickTask() }
@@ -649,8 +651,11 @@ struct TaskListView: View {
             Image(systemName: "magnifyingglass")
                 .font(.system(size: 14, weight: .semibold))
                 .foregroundStyle(DesignPalette.secondary)
-            TextField("Search tasks", text: $searchText)
-                .font(.system(size: 13, weight: .medium, design: .rounded))
+            AppTextField(
+                placeholder: "Search tasks",
+                text: $searchText,
+                font: .system(size: 13, weight: .medium, design: .rounded)
+            )
             if !searchText.isEmpty {
                 Button {
                     searchText = ""
@@ -926,8 +931,15 @@ private struct OverdueListSheet: View {
                     }
                 }
             }
+            .listStyle(.plain)
+            .scrollContentBackground(.hidden)
+            .foregroundStyle(DesignPalette.ink)
+            .appBackdrop()
             .navigationTitle("Overdue Tasks")
             .navigationBarTitleDisplayMode(.inline)
+            .toolbarBackground(DesignPalette.background, for: .navigationBar)
+            .toolbarBackground(.visible, for: .navigationBar)
+            .tint(DesignPalette.primary)
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done") {

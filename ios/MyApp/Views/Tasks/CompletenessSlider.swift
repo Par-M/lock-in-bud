@@ -23,14 +23,17 @@ struct CompletenessSlider: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
                 Text("\(formatMinutes(completedMinutes)) tracked")
-                    .font(.subheadline.weight(.medium))
+                    .font(DesignPalette.body(14).weight(.medium))
+                    .foregroundStyle(DesignPalette.ink)
                 Spacer()
                 Text("\(formatMinutes(estimatedMinutes)) estimated")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
+                    .font(DesignPalette.body(13))
+                    .foregroundStyle(DesignPalette.secondary)
             }
 
-            Text("Time tracked does not mark this task complete.").font(.caption).foregroundStyle(.secondary)
+            Text("Time tracked does not mark this task complete.")
+                .font(DesignPalette.body(11))
+                .foregroundStyle(DesignPalette.secondary)
             Slider(
                 value: Binding(
                     get: { Double(completedMinutes) },
@@ -44,15 +47,15 @@ struct CompletenessSlider: View {
                     }
                 }
             )
-
+            .tint(DesignPalette.primary)
             .accessibilityLabel("Time tracked in minutes")
             HStack {
                 Text("0")
                 Spacer()
                 Text(formatMinutes(estimatedMinutes))
             }
-            .font(.caption2)
-            .foregroundStyle(.tertiary)
+            .font(DesignPalette.body(11))
+            .foregroundStyle(DesignPalette.secondary)
         }
     }
 

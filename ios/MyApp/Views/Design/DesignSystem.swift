@@ -146,6 +146,31 @@ struct AppSecondaryButtonStyle: ButtonStyle {
     }
 }
 
+/// Text field with an ink-colored placeholder so prompts stay readable on white cards.
+struct AppTextField: View {
+    let placeholder: String
+    @Binding var text: String
+    var font: Font = DesignPalette.body(14)
+    var color: Color = DesignPalette.ink
+    var axis: Axis = .horizontal
+
+    var body: some View {
+        ZStack(alignment: .leading) {
+            if text.isEmpty {
+                Text(placeholder)
+                    .font(font)
+                    .foregroundStyle(color)
+                    .allowsHitTesting(false)
+            }
+            TextField("", text: $text, axis: axis)
+                .textFieldStyle(.plain)
+                .font(font)
+                .foregroundStyle(color)
+                .tint(DesignPalette.primary)
+        }
+    }
+}
+
 /// Round icon-only control (settings, plus, arrows) with a 44pt hit target.
 struct AppIconButton: View {
     let symbol: String

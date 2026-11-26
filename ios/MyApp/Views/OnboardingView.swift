@@ -26,20 +26,23 @@ struct OnboardingView: View {
             .tabViewStyle(.page(indexDisplayMode: .never))
             .animation(.default, value: step)
 
-            HStack {
+            HStack(spacing: 12) {
                 if step > 0 {
                     Button("Back") { step -= 1 }
-                        .buttonStyle(.bordered)
+                        .buttonStyle(AppSecondaryButtonStyle())
+                        .frame(width: 110)
                 }
-                Spacer()
+                Spacer(minLength: 8)
                 Button(continueTitle) {
                     next()
                 }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(AppPrimaryButtonStyle())
+                .frame(maxWidth: step > 0 ? .infinity : 180)
                 .disabled(continueDisabled)
             }
             .padding()
         }
+        .appBackdrop()
         .sheet(isPresented: $showFirstTask) {
             TaskFormView(mode: .add) { _ in
                 complete()
@@ -53,12 +56,13 @@ struct OnboardingView: View {
         pageView {
             Image(systemName: "calendar.badge.clock")
                 .font(.system(size: 72))
-                .foregroundStyle(.tint)
+                .foregroundStyle(DesignPalette.primary)
             Text("Lock In Bud")
-                .font(.largeTitle.bold())
+                .font(DesignPalette.screenTitle(34))
+                .foregroundStyle(DesignPalette.ink)
             Text("Start with one task.\nChoose what matters today and make a plan you can change.")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
+                .font(DesignPalette.body(14))
+                .foregroundStyle(DesignPalette.secondary)
                 .multilineTextAlignment(.center)
         }
     }
@@ -67,21 +71,28 @@ struct OnboardingView: View {
         pageView {
             Image(systemName: "sparkles")
                 .font(.system(size: 48))
-                .foregroundStyle(.tint)
+                .foregroundStyle(DesignPalette.primary)
+                .frame(width: 72, height: 72)
+                .background(DesignPalette.sage, in: Circle())
             Text("How the AI works")
-                .font(.title2.bold())
+                .font(DesignPalette.screenTitle(24))
+                .foregroundStyle(DesignPalette.ink)
             Text("The scheduler proposes times around your deadlines and fixed events. Review a plan before applying it. You can connect a calendar and enable reminders later in Settings.")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
+                .font(DesignPalette.body(13))
+                .foregroundStyle(DesignPalette.secondary)
                 .multilineTextAlignment(.center)
 
             Button {
                 showFirstTask = true
             } label: {
-                Label("Create Your First Task", systemImage: "plus.circle.fill")
-                    .font(.body.weight(.semibold))
+                HStack(spacing: 8) {
+                    Image(systemName: "plus.circle.fill")
+                    Text("Create Your First Task")
+                }
+                .frame(maxWidth: .infinity)
             }
-            .buttonStyle(.borderedProminent)
+            .buttonStyle(AppPrimaryButtonStyle())
+            .padding(.horizontal, 24)
         }
     }
 

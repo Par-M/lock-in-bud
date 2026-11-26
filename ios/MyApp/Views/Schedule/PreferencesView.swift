@@ -15,52 +15,97 @@ struct PreferencesView: View {
 
     var body: some View {
         NavigationStack {
-            Form {
-                Section("Work Hours") {
-                    Stepper(value: $workStart, in: 0...24, step: 0.5) {
-                        Text("Start: \(hourText(workStart))")
-                    }
-                    Stepper(value: $workEnd, in: 0...24, step: 0.5) {
-                        Text("End: \(hourText(workEnd))")
-                    }
-                    if !workHoursValid {
-                        Label("End must be after start", systemImage: "exclamationmark.triangle")
-                            .font(.footnote)
-                            .foregroundStyle(.orange)
-                    }
-                }
-                Section("Scheduling") {
-                    Stepper(value: $buffer, in: 0...120, step: 5) {
-                        Text("Buffer: \(buffer) min")
-                    }
-                    Picker("Energy Level", selection: $energy) {
-                        ForEach(1...5, id: \.self) { level in
-                            Text("\(level)").tag(level)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 20) {
+                    AppHeader(eyebrow: "PREFERENCES", title: "Plan your day.")
+
+                    settingSection("WORK HOURS") {
+                        Stepper(value: $workStart, in: 0...24, step: 0.5) {
+                            Text("Start: \(hourText(workStart))")
+                                .font(DesignPalette.body(14))
+                        }
+                        .tint(DesignPalette.primary)
+                        Divider().background(DesignPalette.cream)
+                        Stepper(value: $workEnd, in: 0...24, step: 0.5) {
+                            Text("End: \(hourText(workEnd))")
+                                .font(DesignPalette.body(14))
+                        }
+                        .tint(DesignPalette.primary)
+                        if !workHoursValid {
+                            Divider().background(DesignPalette.cream)
+                            Label("End must be after start", systemImage: "exclamationmark.triangle")
+                                .font(DesignPalette.body(12))
+                                .foregroundStyle(.orange)
                         }
                     }
-                    .pickerStyle(.segmented)
-                    Stepper(value: $maxDailyHours, in: 1...16) {
-                        Text("Max daily hours: \(maxDailyHours)")
-                    }
-                    Stepper(value: $defaultDuration, in: 5...480, step: 5) {
-                        Text("Default task duration: \(defaultDuration) min")
-                    }
-                    Picker("Default Priority", selection: $defaultPriority) {
-                        ForEach(TaskPriority.allCases) { priority in
-                            Text(priority.label).tag(priority)
+
+                    settingSection("SCHEDULING") {
+                        Stepper(value: $buffer, in: 0...120, step: 5) {
+                            Text("Buffer: \(buffer) min")
+                                .font(DesignPalette.body(14))
+                        }
+                        .tint(DesignPalette.primary)
+                        Divider().background(DesignPalette.cream)
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Energy Level")
+                                .font(DesignPalette.body(13).weight(.semibold))
+                            Picker("Energy Level", selection: $energy) {
+                                ForEach(1...5, id: \.self) { level in
+                                    Text("\(level)").tag(level)
+                                }
+                            }
+                            .pickerStyle(.segmented)
+                            .tint(DesignPalette.primary)
+                            .accessibilityLabel("Energy Level")
+                        }
+                        Divider().background(DesignPalette.cream)
+                        Stepper(value: $maxDailyHours, in: 1...16) {
+                            Text("Max daily hours: \(maxDailyHours)")
+                                .font(DesignPalette.body(14))
+                        }
+                        .tint(DesignPalette.primary)
+                        Divider().background(DesignPalette.cream)
+                        Stepper(value: $defaultDuration, in: 5...480, step: 5) {
+                            Text("Default task duration: \(defaultDuration) min")
+                                .font(DesignPalette.body(14))
+                        }
+                        .tint(DesignPalette.primary)
+                        Divider().background(DesignPalette.cream)
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Default Priority")
+                                .font(DesignPalette.body(13).weight(.semibold))
+                            Picker("Default Priority", selection: $defaultPriority) {
+                                ForEach(TaskPriority.allCases) { priority in
+                                    Text(priority.label).tag(priority)
+                                }
+                            }
+                            .pickerStyle(.segmented)
+                            .tint(DesignPalette.primary)
+                            .accessibilityLabel("Default Priority")
                         }
                     }
-                    .pickerStyle(.segmented)
-                }
-                Section {
-                    Button("Save Preferences") {
-                        Task { await save() }
+
+                    AppCard(padding: 14) {
+                        Button {
+                            Task { await save() }
+                        } label: {
+                            Text("Save Preferences")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(AppPrimaryButtonStyle())
+                        .disabled(!isLoaded || !workHoursValid)
                     }
-                    .disabled(!isLoaded || !workHoursValid)
                 }
+                .padding(.horizontal, DesignPalette.pagePadding)
+                .padding(.top, 12)
+                .padding(.bottom, 24)
             }
+            .appBackdrop()
             .navigationTitle("Preferences")
             .navigationBarTitleDisplayMode(.inline)
+            .toolbarBackground(DesignPalette.background, for: .navigationBar)
+            .toolbarBackground(.visible, for: .navigationBar)
+            .tint(DesignPalette.primary)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Close") { dismiss() }
@@ -78,6 +123,19 @@ struct PreferencesView: View {
                     defaultPriority = TaskPriority(rawValue: pref.defaultPriority) ?? .medium
                 }
                 isLoaded = true
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func settingSection<Content: View>(
+        _ title: String,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            AppEyebrow(text: title)
+            AppCard(padding: 14) {
+                content()
             }
         }
     }
