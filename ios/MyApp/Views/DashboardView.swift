@@ -102,7 +102,7 @@ struct DashboardView: View {
                     .lineLimit(1)
             }
             .foregroundStyle(isSelected ? DesignPalette.ink : TabBarColor.inactiveLabel)
-            .frame(maxWidth: .infinity, minHeight: 56, maxHeight: .infinity)
+            .frame(maxWidth: .infinity, minHeight: 56, maxHeight: 56)
             .background(
                 RoundedRectangle(cornerRadius: 16)
                     .fill(isSelected ? TabBarColor.lime : Color.clear)
